@@ -1,4 +1,4 @@
-const { User, Student, Tutor } = require("../models");
+const { prisma } = require("../models");
 const { hashPassword, comparePassword } = require("../utils/hash");
 const { generateToken } = require("../config/jwt");
 
@@ -21,36 +21,42 @@ exports.signup = async (req, res, next) => {
       return res.status(400).json({ message: "Valid role (student or tutor) is required" });
     }
 
-    const exists = await User.findOne({ where: { email } });
+    const exists = await prisma.user.findUnique({ where: { email } });
     if (exists) {
       return res.status(400).json({ message: "Email already exists" });
     }
 
     const hashedPassword = await hashPassword(password);
 
-    const user = await User.create({
-      fullName,
-      email,
-      password: hashedPassword,
-      role
+    const user = await prisma.user.create({
+      data: {
+        fullName,
+        email,
+        password: hashedPassword,
+        role
+      }
     });
 
     if (role === "student") {
-      await Student.create({
-        userId: user.id,
-        educationLevel: req.body.educationLevel,
-        grade: req.body.grade,
-        subjects: req.body.subjects,
-        learningMode: req.body.learningMode
+      await prisma.student.create({
+        data: {
+          userId: user.id,
+          educationLevel: req.body.educationLevel,
+          grade: req.body.grade,
+          subjects: req.body.subjects || [],
+          learningMode: req.body.learningMode
+        }
       });
     }
 
     if (role === "tutor") {
-      await Tutor.create({
-        userId: user.id,
-        subjects: req.body.subjects,
-        educationLevels: req.body.educationLevels,
-        experience: req.body.experience
+      await prisma.tutor.create({
+        data: {
+          userId: user.id,
+          subjects: req.body.subjects || [],
+          educationLevels: req.body.educationLevels || [],
+          experience: req.body.experience
+        }
       });
     }
 
@@ -71,7 +77,7 @@ exports.login = async (req, res, next) => {
       return res.status(400).json({ message: "Email and password are required" });
     }
 
-    const user = await User.findOne({ where: { email } });
+    const user = await prisma.user.findUnique({ where: { email } });
     console.log("User found:", user ? "Yes" : "No");
     
     if (!user) {
