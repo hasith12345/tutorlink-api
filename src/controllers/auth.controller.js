@@ -28,8 +28,19 @@ exports.signup = async (req, res, next) => {
     }
 
     // Validate password strength
-    if (password.length < 8) {
-      return res.status(400).json({ message: "Password must be at least 8 characters long" });
+    if (password.length < 8 || password.length > 12) {
+      return res.status(400).json({ message: "Password must be 8-12 characters long" });
+    }
+    
+    const hasUppercase = /[A-Z]/.test(password);
+    const hasLowercase = /[a-z]/.test(password);
+    const hasNumber = /[0-9]/.test(password);
+    const hasSpecialChar = /[!@#$%^&*]/.test(password);
+    
+    if (!hasUppercase || !hasLowercase || !hasNumber || !hasSpecialChar) {
+      return res.status(400).json({ 
+        message: "Password must contain at least 1 uppercase letter, 1 lowercase letter, 1 number, and 1 special character (!@#$%^&*)" 
+      });
     }
 
     // Check if user already exists
