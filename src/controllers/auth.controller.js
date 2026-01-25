@@ -44,10 +44,13 @@ exports.signup = async (req, res, next) => {
       });
     }
 
-    // Check if user already exists
-    const exists = await prisma.user.findUnique({ where: { email } });
+    // ✅ CRITICAL: Check if user already exists
+    // This prevents duplicate accounts with the same email
+    const exists = await prisma.user.findUnique({ where: { email: email.toLowerCase().trim() } });
     if (exists) {
-      return res.status(400).json({ message: "An account with this email already exists" });
+      return res.status(400).json({ 
+        message: "An account with this email already exists. Please login or use a different email." 
+      });
     }
 
     // Hash password
@@ -57,20 +60,19 @@ exports.signup = async (req, res, next) => {
     const verificationCode = generateVerificationCode();
     const verificationExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes from now
 
-    // Create user
+    // ✅ Create user WITHOUT role field (removed from schema)
     const user = await prisma.user.create({
       data: {
         fullName: fullName.trim(),
         email: email.toLowerCase().trim(),
         password: hashedPassword,
-        role,
         emailVerificationCode: verificationCode,
         verificationCodeExpiry: verificationExpiry,
         isEmailVerified: false
       }
     });
 
-    // Create role-specific profile
+    // ✅ Create role-specific profile based on user selection
     if (role === "student") {
       // Validate student-specific fields
       const { educationLevel, grade, subjects, learningMode } = req.body;
@@ -140,7 +142,7 @@ exports.signup = async (req, res, next) => {
     console.log("Signup successful for:", user.email);
     res.status(201).json({ 
       token, 
-      role,
+      role,  // Return the role they signed up as (for frontend use)
       email: user.email,
       isEmailVerified: false,
       message: "Account created successfully. Please check your email for verification code."
@@ -152,6 +154,9 @@ exports.signup = async (req, res, next) => {
   }
 };
 
+// ✅ LOGIN WITH AUTOMATIC ROLE DETECTION
+// This is the ONLY login endpoint - user logs in once with email + password
+// System auto-detects which roles the user has based on profile tables
 exports.login = async (req, res, next) => {
   try {
     console.log("Login attempt:", req.body);
@@ -161,14 +166,22 @@ exports.login = async (req, res, next) => {
       return res.status(400).json({ message: "Email and password are required" });
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    // ✅ Fetch user with BOTH Student and Tutor profiles
+    // This allows us to check which roles exist for this user
+    const user = await prisma.user.findUnique({ 
+      where: { email: email.toLowerCase().trim() },
+      include: {
+        student: true,  // Include student profile if it exists
+        tutor: true     // Include tutor profile if it exists
+      }
+    });
     console.log("User found:", user ? "Yes" : "No");
     
     if (!user) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    // Check if email is verified
+    // ✅ Check if email is verified (MUST be verified before login)
     if (!user.isEmailVerified) {
       return res.status(403).json({ 
         message: "Please verify your email before logging in",
@@ -177,6 +190,7 @@ exports.login = async (req, res, next) => {
       });
     }
 
+    // Verify password
     const valid = await comparePassword(password, user.password);
     console.log("Password valid:", valid);
     
@@ -184,8 +198,26 @@ exports.login = async (req, res, next) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
+    // ✅ ROLE DETECTION LOGIC
+    // Check which profiles exist to determine available roles
+    const hasStudentProfile = !!user.student;  // true if student profile exists
+    const hasTutorProfile = !!user.tutor;      // true if tutor profile exists
+
+    // Generate JWT token
     const token = generateToken(user);
-    res.json({ token, role: user.role });
+    
+    // ✅ Return user info with role flags
+    // Frontend will use these flags to determine where to redirect
+    res.json({ 
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        hasStudentProfile,   // true/false
+        hasTutorProfile      // true/false
+      }
+    });
 
   } catch (err) {
     console.error("Login error:", err);
@@ -295,6 +327,112 @@ exports.resendVerificationCode = async (req, res, next) => {
 
   } catch (err) {
     console.error("Resend verification code error:", err);
+    next(err);
+  }
+};
+
+// ✅ ADD ROLE API - Allows user to add a second role
+// Example: A logged-in Student can become a Tutor (or vice versa)
+// IMPORTANT: This does NOT create a new User - only adds a profile
+exports.addRole = async (req, res, next) => {
+  try {
+    // Get user ID from JWT token (set by auth middleware)
+    const userId = req.user.id;
+    const { role, ...roleData } = req.body;
+
+    // Validate role
+    if (!role || !["student", "tutor"].includes(role)) {
+      return res.status(400).json({ message: "Valid role (student or tutor) is required" });
+    }
+
+    // ✅ Fetch user with existing profiles
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        student: true,
+        tutor: true
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // ✅ Check if user already has this role
+    if (role === "student" && user.student) {
+      return res.status(400).json({ message: "You already have a Student profile" });
+    }
+
+    if (role === "tutor" && user.tutor) {
+      return res.status(400).json({ message: "You already have a Tutor profile" });
+    }
+
+    // ✅ Create the new profile
+    if (role === "student") {
+      const { educationLevel, grade, subjects, learningMode } = roleData;
+
+      // Validate required fields
+      if (!subjects || !Array.isArray(subjects) || subjects.length === 0) {
+        return res.status(400).json({ message: "At least one subject is required" });
+      }
+
+      if (!learningMode || !["online", "physical", "both"].includes(learningMode)) {
+        return res.status(400).json({ message: "Valid learning mode is required (online, physical, or both)" });
+      }
+
+      await prisma.student.create({
+        data: {
+          userId: user.id,
+          educationLevel: educationLevel || null,
+          grade: grade || null,
+          subjects: subjects,
+          learningMode: learningMode
+        }
+      });
+
+      console.log(`Student profile added for user: ${user.email}`);
+      return res.status(201).json({ 
+        message: "Student profile added successfully",
+        hasStudentProfile: true,
+        hasTutorProfile: !!user.tutor
+      });
+    }
+
+    if (role === "tutor") {
+      const { subjects, educationLevels, experience } = roleData;
+
+      // Validate required fields
+      if (!subjects || !Array.isArray(subjects) || subjects.length === 0) {
+        return res.status(400).json({ message: "At least one subject is required" });
+      }
+
+      if (!educationLevels || !Array.isArray(educationLevels) || educationLevels.length === 0) {
+        return res.status(400).json({ message: "At least one education level is required" });
+      }
+
+      if (!experience) {
+        return res.status(400).json({ message: "Years of experience is required" });
+      }
+
+      await prisma.tutor.create({
+        data: {
+          userId: user.id,
+          subjects: subjects,
+          educationLevels: educationLevels,
+          experience: experience
+        }
+      });
+
+      console.log(`Tutor profile added for user: ${user.email}`);
+      return res.status(201).json({ 
+        message: "Tutor profile added successfully",
+        hasStudentProfile: !!user.student,
+        hasTutorProfile: true
+      });
+    }
+
+  } catch (err) {
+    console.error("Add role error:", err);
     next(err);
   }
 };

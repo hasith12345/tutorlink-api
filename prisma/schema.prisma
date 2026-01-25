@@ -9,24 +9,30 @@ datasource db {
   provider = "postgresql"
 }
 
+// User table: Authentication only
+// - A user logs in ONCE using email + password
+// - Roles are NOT stored here
+// - Roles are determined by the existence of Student/Tutor profiles
 model User {
   id                     String    @id @default(uuid()) @db.Uuid
   fullName               String
-  email                  String    @unique
+  email                  String    @unique  // Email must be unique - one account per email
   password               String
-  role                   Role
   isEmailVerified        Boolean   @default(false)
   emailVerificationCode  String?
   verificationCodeExpiry DateTime?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
-  student                Student?
-  tutor                  Tutor?
+  student                Student?  // Optional - if exists, user has student role
+  tutor                  Tutor?    // Optional - if exists, user has tutor role
 }
 
+// Student profile table
+// - Created when user signs up as Student OR adds Student role later
+// - userId is UNIQUE - a user can have only ONE student profile
 model Student {
   id             String   @id @default(uuid()) @db.Uuid
-  userId         String   @unique @db.Uuid
+  userId         String   @unique @db.Uuid  // One-to-one with User
   educationLevel String?
   grade          String?
   subjects       String[]
@@ -36,18 +42,16 @@ model Student {
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
+// Tutor profile table
+// - Created when user signs up as Tutor OR adds Tutor role later
+// - userId is UNIQUE - a user can have only ONE tutor profile
 model Tutor {
   id              String   @id @default(uuid()) @db.Uuid
-  userId          String   @unique @db.Uuid
+  userId          String   @unique @db.Uuid  // One-to-one with User
   subjects        String[]
   educationLevels String[]
   experience      String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-enum Role {
-  student
-  tutor
 }
