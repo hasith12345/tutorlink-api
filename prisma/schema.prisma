@@ -10,7 +10,7 @@ datasource db {
 }
 
 model User {
-  id        Int       @id @default(autoincrement())
+  id        String    @id @default(uuid()) @db.Uuid
   fullName  String
   email     String    @unique
   password  String
@@ -22,8 +22,8 @@ model User {
 }
 
 model Student {
-  id             Int      @id @default(autoincrement())
-  userId         Int      @unique
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @unique @db.Uuid
   educationLevel String?
   grade          String?
   subjects       String[]
@@ -34,8 +34,8 @@ model Student {
 }
 
 model Tutor {
-  id              Int      @id @default(autoincrement())
-  userId          Int      @unique
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @unique @db.Uuid
   subjects        String[]
   educationLevels String[]
   experience      String?
