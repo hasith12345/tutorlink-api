@@ -2,6 +2,8 @@ const { prisma } = require("../models");
 const { hashPassword, comparePassword } = require("../utils/hash");
 const { generateToken } = require("../config/jwt");
 const { generateVerificationCode, sendVerificationEmail } = require("../utils/email");
+const { AuthenticationClient } = require("auth0");
+const axios = require("axios");
 
 exports.signup = async (req, res, next) => {
   try {
@@ -433,6 +435,312 @@ exports.addRole = async (req, res, next) => {
 
   } catch (err) {
     console.error("Add role error:", err);
+    next(err);
+  }
+};
+
+// ✅ OAUTH ROUTES FOR AUTH0 GOOGLE LOGIN
+
+/**
+ * GET /auth/oauth/login
+ * Redirects user to Auth0 for Google OAuth login
+ * Accepts ?mode=login or ?mode=signup to determine flow behavior
+ */
+exports.oauthLogin = async (req, res, next) => {
+  try {
+    // Get mode from query parameter (login or signup)
+    const mode = req.query.mode || 'login';
+    
+    // Store mode in state parameter to pass through OAuth flow
+    const stateData = JSON.stringify({ mode });
+    const state = Buffer.from(stateData).toString('base64');
+    
+    // Build Auth0 authorization URL
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: process.env.AUTH0_CLIENT_ID,
+      redirect_uri: process.env.AUTH0_CALLBACK_URL,
+      scope: 'openid profile email',
+      connection: 'google-oauth2',
+      prompt: 'select_account',  // Forces account selection
+      state: state  // Pass mode through OAuth flow
+    });
+    
+    const authUrl = `https://${process.env.AUTH0_DOMAIN}/authorize?${params.toString()}`;
+    
+    console.log("=== OAuth Login Debug ===");
+    console.log("Mode:", mode);
+    console.log("AUTH0_DOMAIN:", process.env.AUTH0_DOMAIN);
+    console.log("AUTH0_CLIENT_ID:", process.env.AUTH0_CLIENT_ID);
+    console.log("AUTH0_CALLBACK_URL:", process.env.AUTH0_CALLBACK_URL);
+    console.log("Full Auth URL:", authUrl);
+    console.log("=========================");
+    
+    res.redirect(authUrl);
+  } catch (err) {
+    console.error("OAuth login error:", err);
+    next(err);
+  }
+};
+
+/**
+ * GET /auth/oauth/callback
+ * Handles Auth0 callback - behavior depends on mode (login vs signup)
+ * - login mode: Only works if user exists, otherwise returns error
+ * - signup mode: Returns OAuth data for new user registration flow
+ */
+exports.oauthCallback = async (req, res, next) => {
+  try {
+    const { code, state } = req.query;
+
+    if (!code) {
+      return res.status(400).json({ message: "Authorization code is required" });
+    }
+
+    // ✅ Extract mode from state parameter
+    let mode = 'login'; // default to login
+    if (state) {
+      try {
+        const stateData = JSON.parse(Buffer.from(state, 'base64').toString());
+        mode = stateData.mode || 'login';
+      } catch (e) {
+        console.log("Could not parse state, defaulting to login mode");
+      }
+    }
+
+    console.log("=== OAuth Callback Debug ===");
+    console.log("Mode:", mode);
+    console.log("Authorization code received:", code.substring(0, 20) + "...");
+
+    // ✅ Step 1: Exchange authorization code for tokens using Auth0 token endpoint
+    const tokenUrl = `https://${process.env.AUTH0_DOMAIN}/oauth/token`;
+    
+    const tokenResponse = await axios.post(tokenUrl, {
+      grant_type: 'authorization_code',
+      client_id: process.env.AUTH0_CLIENT_ID,
+      client_secret: process.env.AUTH0_CLIENT_SECRET,
+      code: code,
+      redirect_uri: process.env.AUTH0_CALLBACK_URL
+    });
+
+    console.log("Token response received");
+    const { access_token, id_token } = tokenResponse.data;
+
+    // ✅ Step 2: Get user profile from Auth0 /userinfo endpoint
+    const userInfoUrl = `https://${process.env.AUTH0_DOMAIN}/userinfo`;
+    const userInfoResponse = await axios.get(userInfoUrl, {
+      headers: {
+        Authorization: `Bearer ${access_token}`
+      }
+    });
+
+    const userProfile = userInfoResponse.data;
+    console.log("Auth0 user profile:", userProfile);
+
+    if (!userProfile.email) {
+      return res.status(400).json({ 
+        message: "Email not provided by Google. Please try again." 
+      });
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+    // ✅ Step 3: Check if user already exists in our database
+    let user = await prisma.user.findUnique({
+      where: { email: userProfile.email.toLowerCase() },
+      include: {
+        student: true,
+        tutor: true
+      }
+    });
+
+    let responseData;
+
+    if (user) {
+      // ✅ User EXISTS
+      
+      if (mode === 'signup') {
+        // SIGNUP MODE but user already exists - log them in instead
+        console.log("Signup attempt for existing user, logging in:", user.email);
+      } else {
+        console.log("Found existing OAuth user:", user.email);
+      }
+      
+      // Ensure they're verified
+      if (!user.isEmailVerified) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { isEmailVerified: true }
+        });
+      }
+
+      // Generate JWT token
+      const token = generateToken(user);
+      const hasStudentProfile = !!user.student;
+      const hasTutorProfile = !!user.tutor;
+
+      responseData = {
+        isNewUser: false,
+        token,
+        user: {
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+          hasStudentProfile,
+          hasTutorProfile
+        }
+      };
+    } else {
+      // ✅ User does NOT exist
+      
+      if (mode === 'login') {
+        // LOGIN MODE: User must exist - show error
+        console.log("Login attempt for non-existent user:", userProfile.email);
+        const errorUrl = `${frontendUrl}/auth/oauth/error?error=${encodeURIComponent("No account found with this Google account. Please sign up first.")}`;
+        return res.redirect(errorUrl);
+      }
+      
+      // SIGNUP MODE: Return OAuth data for registration flow
+      console.log("New OAuth user (signup mode):", userProfile.email);
+      
+      responseData = {
+        isNewUser: true,
+        oauthData: {
+          email: userProfile.email.toLowerCase(),
+          fullName: userProfile.name || userProfile.email,
+          picture: userProfile.picture || null
+        }
+      };
+    }
+
+    // ✅ Step 4: Redirect to frontend with response data
+    const redirectUrl = `${frontendUrl}/auth/oauth/success?data=${encodeURIComponent(JSON.stringify(responseData))}`;
+    
+    console.log("OAuth callback successful, redirecting to frontend");
+    
+    res.redirect(redirectUrl);
+
+  } catch (err) {
+    console.error("OAuth callback error:", err);
+    
+    // Redirect to frontend error page
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const errorUrl = `${frontendUrl}/auth/oauth/error?error=${encodeURIComponent(err.message)}`;
+    res.redirect(errorUrl);
+  }
+};
+
+// ✅ NEW: OAuth Signup - Creates user account with profile in one call
+// Called when OAuth user completes their profile
+exports.oauthSignup = async (req, res, next) => {
+  try {
+    const { email, fullName, role, ...roleData } = req.body;
+
+    console.log("OAuth signup request:", { email, fullName, role });
+
+    // Validate required fields
+    if (!email || !fullName) {
+      return res.status(400).json({ message: "Email and full name are required" });
+    }
+
+    if (!role || !["student", "tutor"].includes(role)) {
+      return res.status(400).json({ message: "Valid role (student or tutor) is required" });
+    }
+
+    // Check if user already exists
+    const exists = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    if (exists) {
+      return res.status(400).json({ 
+        message: "An account with this email already exists. Please login instead." 
+      });
+    }
+
+    // Generate a random password (OAuth users won't use it)
+    const randomPassword = await hashPassword(Math.random().toString(36) + Date.now());
+
+    // Create user
+    const user = await prisma.user.create({
+      data: {
+        fullName: fullName.trim(),
+        email: email.toLowerCase().trim(),
+        password: randomPassword,
+        isEmailVerified: true, // OAuth users are auto-verified
+        emailVerificationCode: null,
+        verificationCodeExpiry: null
+      }
+    });
+
+    // Create role-specific profile
+    if (role === "student") {
+      const { educationLevel, grade, subjects, learningMode } = roleData;
+
+      if (!subjects || !Array.isArray(subjects) || subjects.length === 0) {
+        await prisma.user.delete({ where: { id: user.id } });
+        return res.status(400).json({ message: "At least one subject is required" });
+      }
+
+      if (!learningMode || !["online", "physical", "both"].includes(learningMode)) {
+        await prisma.user.delete({ where: { id: user.id } });
+        return res.status(400).json({ message: "Valid learning mode is required" });
+      }
+
+      await prisma.student.create({
+        data: {
+          userId: user.id,
+          educationLevel: educationLevel || null,
+          grade: grade || null,
+          subjects: subjects,
+          learningMode: learningMode
+        }
+      });
+    }
+
+    if (role === "tutor") {
+      const { subjects, educationLevels, experience } = roleData;
+
+      if (!subjects || !Array.isArray(subjects) || subjects.length === 0) {
+        await prisma.user.delete({ where: { id: user.id } });
+        return res.status(400).json({ message: "At least one subject is required" });
+      }
+
+      if (!educationLevels || !Array.isArray(educationLevels) || educationLevels.length === 0) {
+        await prisma.user.delete({ where: { id: user.id } });
+        return res.status(400).json({ message: "At least one education level is required" });
+      }
+
+      if (!experience) {
+        await prisma.user.delete({ where: { id: user.id } });
+        return res.status(400).json({ message: "Years of experience is required" });
+      }
+
+      await prisma.tutor.create({
+        data: {
+          userId: user.id,
+          subjects: subjects,
+          educationLevels: educationLevels,
+          experience: experience
+        }
+      });
+    }
+
+    // Generate JWT token
+    const token = generateToken(user);
+
+    console.log("OAuth signup successful for:", user.email);
+    
+    res.status(201).json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        hasStudentProfile: role === "student",
+        hasTutorProfile: role === "tutor"
+      }
+    });
+
+  } catch (err) {
+    console.error("OAuth signup error:", err);
     next(err);
   }
 };
