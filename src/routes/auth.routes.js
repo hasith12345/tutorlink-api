@@ -7,7 +7,9 @@ const {
   addRole,
   oauthLogin,
   oauthCallback,
-  oauthSignup
+  oauthSignup,
+  getProfile,
+  updateProfile
 } = require("../controllers/auth.controller");
 const authMiddleware = require("../middleware/auth.middleware");
 
@@ -24,7 +26,9 @@ router.get("/oauth/login", oauthLogin);
 router.get("/oauth/callback", oauthCallback);
 router.post("/oauth/signup", oauthSignup);  // New: Create account for OAuth users
 
-// ✅ Protected route - user must be authenticated
+// ✅ Protected routes - user must be authenticated
 router.post("/add-role", authMiddleware, addRole);
+router.get("/profile", authMiddleware, getProfile);
+router.put("/profile", authMiddleware, updateProfile);
 
 module.exports = router;

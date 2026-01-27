@@ -744,3 +744,175 @@ exports.oauthSignup = async (req, res, next) => {
     next(err);
   }
 };
+
+// ✅ GET USER PROFILE - Returns complete user profile with student/tutor details
+exports.getProfile = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    // Fetch user with both profiles
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        student: true,
+        tutor: true
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Build response object
+    const profile = {
+      id: user.id,
+      fullName: user.fullName,
+      email: user.email,
+      isEmailVerified: user.isEmailVerified,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+      hasStudentProfile: !!user.student,
+      hasTutorProfile: !!user.tutor,
+      student: user.student ? {
+        id: user.student.id,
+        educationLevel: user.student.educationLevel,
+        grade: user.student.grade,
+        subjects: user.student.subjects,
+        learningMode: user.student.learningMode,
+        createdAt: user.student.createdAt
+      } : null,
+      tutor: user.tutor ? {
+        id: user.tutor.id,
+        subjects: user.tutor.subjects,
+        educationLevels: user.tutor.educationLevels,
+        experience: user.tutor.experience,
+        createdAt: user.tutor.createdAt
+      } : null
+    };
+
+    res.json(profile);
+
+  } catch (err) {
+    console.error("Get profile error:", err);
+    next(err);
+  }
+};
+
+// ✅ UPDATE USER PROFILE - Updates user profile and student/tutor details
+exports.updateProfile = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { fullName, student, tutor } = req.body;
+
+    // Validate fullName if provided
+    if (fullName !== undefined && (!fullName || fullName.trim().length < 2)) {
+      return res.status(400).json({ message: "Full name must be at least 2 characters" });
+    }
+
+    // Fetch current user to check what profiles exist
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { student: true, tutor: true }
+    });
+
+    if (!currentUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Update user's basic info
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(fullName && { fullName: fullName.trim() })
+      }
+    });
+
+    // Update student profile if it exists and data is provided
+    if (currentUser.student && student) {
+      const { educationLevel, grade, subjects, learningMode } = student;
+      
+      // Validate subjects if provided
+      if (subjects !== undefined && (!Array.isArray(subjects) || subjects.length === 0)) {
+        return res.status(400).json({ message: "At least one subject is required for student profile" });
+      }
+
+      // Validate learning mode if provided
+      if (learningMode !== undefined && !["online", "physical", "both"].includes(learningMode)) {
+        return res.status(400).json({ message: "Valid learning mode is required (online, physical, or both)" });
+      }
+
+      await prisma.student.update({
+        where: { userId: userId },
+        data: {
+          ...(educationLevel !== undefined && { educationLevel }),
+          ...(grade !== undefined && { grade }),
+          ...(subjects !== undefined && { subjects }),
+          ...(learningMode !== undefined && { learningMode })
+        }
+      });
+    }
+
+    // Update tutor profile if it exists and data is provided
+    if (currentUser.tutor && tutor) {
+      const { subjects, educationLevels, experience } = tutor;
+
+      // Validate subjects if provided
+      if (subjects !== undefined && (!Array.isArray(subjects) || subjects.length === 0)) {
+        return res.status(400).json({ message: "At least one subject is required for tutor profile" });
+      }
+
+      // Validate education levels if provided
+      if (educationLevels !== undefined && (!Array.isArray(educationLevels) || educationLevels.length === 0)) {
+        return res.status(400).json({ message: "At least one education level is required for tutor profile" });
+      }
+
+      await prisma.tutor.update({
+        where: { userId: userId },
+        data: {
+          ...(subjects !== undefined && { subjects }),
+          ...(educationLevels !== undefined && { educationLevels }),
+          ...(experience !== undefined && { experience })
+        }
+      });
+    }
+
+    // Fetch updated profile
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { student: true, tutor: true }
+    });
+
+    // Build response
+    const profile = {
+      id: user.id,
+      fullName: user.fullName,
+      email: user.email,
+      isEmailVerified: user.isEmailVerified,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+      hasStudentProfile: !!user.student,
+      hasTutorProfile: !!user.tutor,
+      student: user.student ? {
+        id: user.student.id,
+        educationLevel: user.student.educationLevel,
+        grade: user.student.grade,
+        subjects: user.student.subjects,
+        learningMode: user.student.learningMode,
+        createdAt: user.student.createdAt
+      } : null,
+      tutor: user.tutor ? {
+        id: user.tutor.id,
+        subjects: user.tutor.subjects,
+        educationLevels: user.tutor.educationLevels,
+        experience: user.tutor.experience,
+        createdAt: user.tutor.createdAt
+      } : null
+    };
+
+    res.json({ message: "Profile updated successfully", profile });
+
+  } catch (err) {
+    console.error("Update profile error:", err);
+    next(err);
+  }
+};
