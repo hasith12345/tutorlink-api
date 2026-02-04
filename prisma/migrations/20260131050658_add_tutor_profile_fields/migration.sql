@@ -1,0 +1,15 @@
+-- AlterTable
+ALTER TABLE "Tutor" ADD COLUMN     "avatar" TEXT,
+ADD COLUMN     "bio" TEXT,
+ADD COLUMN     "education" TEXT,
+ADD COLUMN     "experience" TEXT,
+ADD COLUMN     "hourlyRate" INTEGER,
+ADD COLUMN     "isAvailable" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN     "isVerified" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "learningMode" TEXT,
+ADD COLUMN     "location" TEXT,
+ADD COLUMN     "rating" DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+ADD COLUMN     "subject" TEXT,
+ADD COLUMN     "subjects" TEXT[],
+ADD COLUMN     "totalReviews" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "totalStudents" INTEGER NOT NULL DEFAULT 0;

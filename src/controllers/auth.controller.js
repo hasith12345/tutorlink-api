@@ -77,55 +77,89 @@ exports.signup = async (req, res, next) => {
     // ✅ Create role-specific profile based on user selection
     if (role === "student") {
       // Validate student-specific fields
-      const { educationLevel, grade, subjects, learningMode } = req.body;
+      const { dob, phone, address, schoolGrade, schoolName, parentName, parentPhone } = req.body;
       
-      if (!subjects || !Array.isArray(subjects) || subjects.length === 0) {
+      if (!dob) {
         // Rollback user creation
         await prisma.user.delete({ where: { id: user.id } });
-        return res.status(400).json({ message: "At least one subject is required" });
+        return res.status(400).json({ message: "Date of birth is required" });
       }
 
-      if (!learningMode || !["online", "physical", "both"].includes(learningMode)) {
+      if (!phone) {
         await prisma.user.delete({ where: { id: user.id } });
-        return res.status(400).json({ message: "Valid learning mode is required (online, physical, or both)" });
+        return res.status(400).json({ message: "Phone number is required" });
+      }
+
+      if (!address) {
+        await prisma.user.delete({ where: { id: user.id } });
+        return res.status(400).json({ message: "Address is required" });
+      }
+
+      if (!schoolGrade) {
+        await prisma.user.delete({ where: { id: user.id } });
+        return res.status(400).json({ message: "School grade is required" });
+      }
+
+      if (!schoolName) {
+        await prisma.user.delete({ where: { id: user.id } });
+        return res.status(400).json({ message: "School name is required" });
+      }
+
+      if (!parentName) {
+        await prisma.user.delete({ where: { id: user.id } });
+        return res.status(400).json({ message: "Parent name is required" });
+      }
+
+      if (!parentPhone) {
+        await prisma.user.delete({ where: { id: user.id } });
+        return res.status(400).json({ message: "Parent phone number is required" });
       }
 
       await prisma.student.create({
         data: {
           userId: user.id,
-          educationLevel: educationLevel || null,
-          grade: grade || null,
-          subjects: subjects,
-          learningMode: learningMode
+          dob: dob,
+          phone: phone,
+          address: address,
+          schoolGrade: schoolGrade,
+          schoolName: schoolName,
+          parentName: parentName,
+          parentPhone: parentPhone
         }
       });
     }
 
     if (role === "tutor") {
       // Validate tutor-specific fields
-      const { subjects, educationLevels, experience } = req.body;
+      const { dob, phone, address, idNumber } = req.body;
 
-      if (!subjects || !Array.isArray(subjects) || subjects.length === 0) {
+      if (!dob) {
         await prisma.user.delete({ where: { id: user.id } });
-        return res.status(400).json({ message: "At least one subject is required" });
+        return res.status(400).json({ message: "Date of birth is required" });
       }
 
-      if (!educationLevels || !Array.isArray(educationLevels) || educationLevels.length === 0) {
+      if (!phone) {
         await prisma.user.delete({ where: { id: user.id } });
-        return res.status(400).json({ message: "At least one education level is required" });
+        return res.status(400).json({ message: "Phone number is required" });
       }
 
-      if (!experience) {
+      if (!address) {
         await prisma.user.delete({ where: { id: user.id } });
-        return res.status(400).json({ message: "Years of experience is required" });
+        return res.status(400).json({ message: "Address is required" });
+      }
+
+      if (!idNumber) {
+        await prisma.user.delete({ where: { id: user.id } });
+        return res.status(400).json({ message: "ID number is required" });
       }
 
       await prisma.tutor.create({
         data: {
           userId: user.id,
-          subjects: subjects,
-          educationLevels: educationLevels,
-          experience: experience
+          dob: dob,
+          phone: phone,
+          address: address,
+          idNumber: idNumber
         }
       });
     }
@@ -371,24 +405,47 @@ exports.addRole = async (req, res, next) => {
 
     // ✅ Create the new profile
     if (role === "student") {
-      const { educationLevel, grade, subjects, learningMode } = roleData;
+      const { dob, phone, address, schoolGrade, schoolName, parentName, parentPhone } = roleData;
 
       // Validate required fields
-      if (!subjects || !Array.isArray(subjects) || subjects.length === 0) {
-        return res.status(400).json({ message: "At least one subject is required" });
+      if (!dob) {
+        return res.status(400).json({ message: "Date of birth is required" });
       }
 
-      if (!learningMode || !["online", "physical", "both"].includes(learningMode)) {
-        return res.status(400).json({ message: "Valid learning mode is required (online, physical, or both)" });
+      if (!phone) {
+        return res.status(400).json({ message: "Phone number is required" });
+      }
+
+      if (!address) {
+        return res.status(400).json({ message: "Address is required" });
+      }
+
+      if (!schoolGrade) {
+        return res.status(400).json({ message: "School grade is required" });
+      }
+
+      if (!schoolName) {
+        return res.status(400).json({ message: "School name is required" });
+      }
+
+      if (!parentName) {
+        return res.status(400).json({ message: "Parent name is required" });
+      }
+
+      if (!parentPhone) {
+        return res.status(400).json({ message: "Parent phone number is required" });
       }
 
       await prisma.student.create({
         data: {
           userId: user.id,
-          educationLevel: educationLevel || null,
-          grade: grade || null,
-          subjects: subjects,
-          learningMode: learningMode
+          dob: dob,
+          phone: phone,
+          address: address,
+          schoolGrade: schoolGrade,
+          schoolName: schoolName,
+          parentName: parentName,
+          parentPhone: parentPhone
         }
       });
 
@@ -401,27 +458,32 @@ exports.addRole = async (req, res, next) => {
     }
 
     if (role === "tutor") {
-      const { subjects, educationLevels, experience } = roleData;
+      const { dob, phone, address, idNumber } = roleData;
 
       // Validate required fields
-      if (!subjects || !Array.isArray(subjects) || subjects.length === 0) {
-        return res.status(400).json({ message: "At least one subject is required" });
+      if (!dob) {
+        return res.status(400).json({ message: "Date of birth is required" });
       }
 
-      if (!educationLevels || !Array.isArray(educationLevels) || educationLevels.length === 0) {
-        return res.status(400).json({ message: "At least one education level is required" });
+      if (!phone) {
+        return res.status(400).json({ message: "Phone number is required" });
       }
 
-      if (!experience) {
-        return res.status(400).json({ message: "Years of experience is required" });
+      if (!address) {
+        return res.status(400).json({ message: "Address is required" });
+      }
+
+      if (!idNumber) {
+        return res.status(400).json({ message: "ID number is required" });
       }
 
       await prisma.tutor.create({
         data: {
           userId: user.id,
-          subjects: subjects,
-          educationLevels: educationLevels,
-          experience: experience
+          dob: dob,
+          phone: phone,
+          address: address,
+          idNumber: idNumber
         }
       });
 
@@ -672,53 +734,87 @@ exports.oauthSignup = async (req, res, next) => {
 
     // Create role-specific profile
     if (role === "student") {
-      const { educationLevel, grade, subjects, learningMode } = roleData;
+      const { dob, phone, address, schoolGrade, schoolName, parentName, parentPhone } = roleData;
 
-      if (!subjects || !Array.isArray(subjects) || subjects.length === 0) {
+      if (!dob) {
         await prisma.user.delete({ where: { id: user.id } });
-        return res.status(400).json({ message: "At least one subject is required" });
+        return res.status(400).json({ message: "Date of birth is required" });
       }
 
-      if (!learningMode || !["online", "physical", "both"].includes(learningMode)) {
+      if (!phone) {
         await prisma.user.delete({ where: { id: user.id } });
-        return res.status(400).json({ message: "Valid learning mode is required" });
+        return res.status(400).json({ message: "Phone number is required" });
+      }
+
+      if (!address) {
+        await prisma.user.delete({ where: { id: user.id } });
+        return res.status(400).json({ message: "Address is required" });
+      }
+
+      if (!schoolGrade) {
+        await prisma.user.delete({ where: { id: user.id } });
+        return res.status(400).json({ message: "School grade is required" });
+      }
+
+      if (!schoolName) {
+        await prisma.user.delete({ where: { id: user.id } });
+        return res.status(400).json({ message: "School name is required" });
+      }
+
+      if (!parentName) {
+        await prisma.user.delete({ where: { id: user.id } });
+        return res.status(400).json({ message: "Parent name is required" });
+      }
+
+      if (!parentPhone) {
+        await prisma.user.delete({ where: { id: user.id } });
+        return res.status(400).json({ message: "Parent phone number is required" });
       }
 
       await prisma.student.create({
         data: {
           userId: user.id,
-          educationLevel: educationLevel || null,
-          grade: grade || null,
-          subjects: subjects,
-          learningMode: learningMode
+          dob: dob,
+          phone: phone,
+          address: address,
+          schoolGrade: schoolGrade,
+          schoolName: schoolName,
+          parentName: parentName,
+          parentPhone: parentPhone
         }
       });
     }
 
     if (role === "tutor") {
-      const { subjects, educationLevels, experience } = roleData;
+      const { dob, phone, address, idNumber } = roleData;
 
-      if (!subjects || !Array.isArray(subjects) || subjects.length === 0) {
+      if (!dob) {
         await prisma.user.delete({ where: { id: user.id } });
-        return res.status(400).json({ message: "At least one subject is required" });
+        return res.status(400).json({ message: "Date of birth is required" });
       }
 
-      if (!educationLevels || !Array.isArray(educationLevels) || educationLevels.length === 0) {
+      if (!phone) {
         await prisma.user.delete({ where: { id: user.id } });
-        return res.status(400).json({ message: "At least one education level is required" });
+        return res.status(400).json({ message: "Phone number is required" });
       }
 
-      if (!experience) {
+      if (!address) {
         await prisma.user.delete({ where: { id: user.id } });
-        return res.status(400).json({ message: "Years of experience is required" });
+        return res.status(400).json({ message: "Address is required" });
+      }
+
+      if (!idNumber) {
+        await prisma.user.delete({ where: { id: user.id } });
+        return res.status(400).json({ message: "ID number is required" });
       }
 
       await prisma.tutor.create({
         data: {
           userId: user.id,
-          subjects: subjects,
-          educationLevels: educationLevels,
-          experience: experience
+          dob: dob,
+          phone: phone,
+          address: address,
+          idNumber: idNumber
         }
       });
     }
@@ -775,17 +871,21 @@ exports.getProfile = async (req, res, next) => {
       hasTutorProfile: !!user.tutor,
       student: user.student ? {
         id: user.student.id,
-        educationLevel: user.student.educationLevel,
-        grade: user.student.grade,
-        subjects: user.student.subjects,
-        learningMode: user.student.learningMode,
+        dob: user.student.dob,
+        phone: user.student.phone,
+        address: user.student.address,
+        schoolGrade: user.student.schoolGrade,
+        schoolName: user.student.schoolName,
+        parentName: user.student.parentName,
+        parentPhone: user.student.parentPhone,
         createdAt: user.student.createdAt
       } : null,
       tutor: user.tutor ? {
         id: user.tutor.id,
-        subjects: user.tutor.subjects,
-        educationLevels: user.tutor.educationLevels,
-        experience: user.tutor.experience,
+        dob: user.tutor.dob,
+        phone: user.tutor.phone,
+        address: user.tutor.address,
+        idNumber: user.tutor.idNumber,
         createdAt: user.tutor.createdAt
       } : null
     };
@@ -829,49 +929,33 @@ exports.updateProfile = async (req, res, next) => {
 
     // Update student profile if it exists and data is provided
     if (currentUser.student && student) {
-      const { educationLevel, grade, subjects, learningMode } = student;
-      
-      // Validate subjects if provided
-      if (subjects !== undefined && (!Array.isArray(subjects) || subjects.length === 0)) {
-        return res.status(400).json({ message: "At least one subject is required for student profile" });
-      }
-
-      // Validate learning mode if provided
-      if (learningMode !== undefined && !["online", "physical", "both"].includes(learningMode)) {
-        return res.status(400).json({ message: "Valid learning mode is required (online, physical, or both)" });
-      }
+      const { dob, phone, address, schoolGrade, schoolName, parentName, parentPhone } = student;
 
       await prisma.student.update({
         where: { userId: userId },
         data: {
-          ...(educationLevel !== undefined && { educationLevel }),
-          ...(grade !== undefined && { grade }),
-          ...(subjects !== undefined && { subjects }),
-          ...(learningMode !== undefined && { learningMode })
+          ...(dob !== undefined && { dob }),
+          ...(phone !== undefined && { phone }),
+          ...(address !== undefined && { address }),
+          ...(schoolGrade !== undefined && { schoolGrade }),
+          ...(schoolName !== undefined && { schoolName }),
+          ...(parentName !== undefined && { parentName }),
+          ...(parentPhone !== undefined && { parentPhone })
         }
       });
     }
 
     // Update tutor profile if it exists and data is provided
     if (currentUser.tutor && tutor) {
-      const { subjects, educationLevels, experience } = tutor;
-
-      // Validate subjects if provided
-      if (subjects !== undefined && (!Array.isArray(subjects) || subjects.length === 0)) {
-        return res.status(400).json({ message: "At least one subject is required for tutor profile" });
-      }
-
-      // Validate education levels if provided
-      if (educationLevels !== undefined && (!Array.isArray(educationLevels) || educationLevels.length === 0)) {
-        return res.status(400).json({ message: "At least one education level is required for tutor profile" });
-      }
+      const { dob, phone, address, idNumber } = tutor;
 
       await prisma.tutor.update({
         where: { userId: userId },
         data: {
-          ...(subjects !== undefined && { subjects }),
-          ...(educationLevels !== undefined && { educationLevels }),
-          ...(experience !== undefined && { experience })
+          ...(dob !== undefined && { dob }),
+          ...(phone !== undefined && { phone }),
+          ...(address !== undefined && { address }),
+          ...(idNumber !== undefined && { idNumber })
         }
       });
     }
@@ -894,17 +978,21 @@ exports.updateProfile = async (req, res, next) => {
       hasTutorProfile: !!user.tutor,
       student: user.student ? {
         id: user.student.id,
-        educationLevel: user.student.educationLevel,
-        grade: user.student.grade,
-        subjects: user.student.subjects,
-        learningMode: user.student.learningMode,
+        dob: user.student.dob,
+        phone: user.student.phone,
+        address: user.student.address,
+        schoolGrade: user.student.schoolGrade,
+        schoolName: user.student.schoolName,
+        parentName: user.student.parentName,
+        parentPhone: user.student.parentPhone,
         createdAt: user.student.createdAt
       } : null,
       tutor: user.tutor ? {
         id: user.tutor.id,
-        subjects: user.tutor.subjects,
-        educationLevels: user.tutor.educationLevels,
-        experience: user.tutor.experience,
+        dob: user.tutor.dob,
+        phone: user.tutor.phone,
+        address: user.tutor.address,
+        idNumber: user.tutor.idNumber,
         createdAt: user.tutor.createdAt
       } : null
     };

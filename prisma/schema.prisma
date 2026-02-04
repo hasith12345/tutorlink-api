@@ -33,10 +33,13 @@ model User {
 model Student {
   id             String   @id @default(uuid()) @db.Uuid
   userId         String   @unique @db.Uuid  // One-to-one with User
-  educationLevel String?
-  grade          String?
-  subjects       String[]
-  learningMode   String?
+  dob            String?
+  phone          String?
+  address        String?
+  schoolGrade    String?
+  schoolName     String?
+  parentName     String?
+  parentPhone    String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -48,9 +51,33 @@ model Student {
 model Tutor {
   id              String   @id @default(uuid()) @db.Uuid
   userId          String   @unique @db.Uuid  // One-to-one with User
-  subjects        String[]
-  educationLevels String[]
-  experience      String?
+  dob             String?
+  phone           String?
+  address         String?
+  location        String?  // City/Region for search
+  idNumber        String?
+  
+  // Professional Information
+  subject         String?  // Main subject (e.g., Mathematics, Physics)
+  subjects        String[] // Multiple subjects the tutor teaches
+  bio             String?  // Short bio/description
+  experience      String?  // Years of experience (e.g., "5 years")
+  education       String?  // Educational background
+  hourlyRate      Int?     // Price per hour in cents (e.g., 5000 = $50.00)
+  
+  // Teaching Preferences
+  learningMode    String?  // "online", "physical", "hybrid"
+  
+  // Stats & Ratings
+  rating          Float    @default(0.0)  // Average rating
+  totalReviews    Int      @default(0)    // Number of reviews
+  totalStudents   Int      @default(0)    // Total students taught
+  
+  // Profile Status
+  isVerified      Boolean  @default(false)
+  isAvailable     Boolean  @default(true)
+  avatar          String?  // Avatar URL
+  
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
