@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Auth0 OAuth Test</title>
+</head>
+<body>
+    <h1>Auth0 OAuth Test</h1>
+    
+    <h2>Your Auth0 Configuration:</h2>
+    <ul>
+        <li><strong>Domain:</strong> dev-qeqx7zzpkuws7tt4.us.auth0.com</li>
+        <li><strong>Client ID:</strong> khiXn7Nf9WU9gUQV1suXL2aUGZekt44P</li>
+        <li><strong>Callback URL:</strong> http://localhost:5001/api/auth/oauth/callback</li>
+    </ul>
+
+    <h2>Steps to Fix 403 Error:</h2>
+    <ol>
+        <li>Go to <a href="https://manage.auth0.com/dashboard" target="_blank">Auth0 Dashboard</a></li>
+        <li>Navigate to: <strong>Applications → Applications</strong></li>
+        <li>Click on your application</li>
+        <li>Go to <strong>Settings</strong> tab</li>
+        <li>Scroll to <strong>"Application URIs"</strong> section</li>
+        <li>In <strong>"Allowed Callback URLs"</strong>, add exactly:
+            <pre style="background:#f0f0f0;padding:10px;">http://localhost:5001/api/auth/oauth/callback</pre>
+        </li>
+        <li>In <strong>"Allowed Web Origins"</strong>, add:
+            <pre style="background:#f0f0f0;padding:10px;">http://localhost:3000, http://localhost:5001</pre>
+        </li>
+        <li>Click <strong>"Save Changes"</strong> at the bottom</li>
+        <li>Go to <strong>Authentication → Social</strong></li>
+        <li>Make sure <strong>Google</strong> is enabled</li>
+        <li>Click on Google and ensure your application is in the "Applications" tab</li>
+    </ol>
+
+    <h2>Test OAuth Flow:</h2>
+    <button onclick="testOAuth()" style="padding:15px 30px;font-size:18px;cursor:pointer;background:#4285F4;color:white;border:none;border-radius:5px;">
+        Test Google Login
+    </button>
+
+    <h2>Direct Link (after fixing Auth0):</h2>
+    <a href="http://localhost:5001/api/auth/oauth/login">Click here to test OAuth via backend</a>
+
+    <script>
+        function testOAuth() {
+            window.location.href = 'http://localhost:5001/api/auth/oauth/login';
+        }
+    </script>
+</body>
+</html>

@@ -2,6 +2,8 @@ const express = require("express");
 const cors = require("cors");
 
 const authRoutes = require("./routes/auth.routes");
+const tutorRoutes = require("./routes/tutor.routes");
+const uploadRoutes = require("./routes/uploadRoutes");
 const errorMiddleware = require("./middleware/error.middleware.js");
 
 const app = express();
@@ -18,6 +20,12 @@ app.use(express.json());
 
 // ✅ PUBLIC AUTH ROUTES
 app.use("/api/auth", authRoutes);
+
+// ✅ PUBLIC TUTOR ROUTES
+app.use("/api/tutors", tutorRoutes);
+
+// ✅ UPLOAD ROUTES (authenticated)
+app.use("/api/upload", uploadRoutes);
 
 // ✅ ERROR HANDLER (LAST)
 app.use(errorMiddleware);
