@@ -251,7 +251,8 @@ exports.login = async (req, res, next) => {
         email: user.email,
         fullName: user.fullName,
         hasStudentProfile,   // true/false
-        hasTutorProfile      // true/false
+        hasTutorProfile,     // true/false
+        avatar: user.student?.avatar || user.tutor?.avatar || null
       }
     });
 
@@ -878,6 +879,7 @@ exports.getProfile = async (req, res, next) => {
         schoolName: user.student.schoolName,
         parentName: user.student.parentName,
         parentPhone: user.student.parentPhone,
+        avatar: user.student.avatar,
         createdAt: user.student.createdAt
       } : null,
       tutor: user.tutor ? {
@@ -886,6 +888,7 @@ exports.getProfile = async (req, res, next) => {
         phone: user.tutor.phone,
         address: user.tutor.address,
         idNumber: user.tutor.idNumber,
+        avatar: user.tutor.avatar,
         createdAt: user.tutor.createdAt
       } : null
     };
@@ -985,6 +988,7 @@ exports.updateProfile = async (req, res, next) => {
         schoolName: user.student.schoolName,
         parentName: user.student.parentName,
         parentPhone: user.student.parentPhone,
+        avatar: user.student.avatar,
         createdAt: user.student.createdAt
       } : null,
       tutor: user.tutor ? {
@@ -1001,6 +1005,55 @@ exports.updateProfile = async (req, res, next) => {
 
   } catch (err) {
     console.error("Update profile error:", err);
+    next(err);
+  }
+};
+
+exports.changePassword = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: "Current password and new password are required" });
+    }
+
+    // Validate new password strength
+    if (newPassword.length < 8 || newPassword.length > 12) {
+      return res.status(400).json({ message: "Password must be 8-12 characters long" });
+    }
+    const hasUppercase = /[A-Z]/.test(newPassword);
+    const hasLowercase = /[a-z]/.test(newPassword);
+    const hasNumber = /[0-9]/.test(newPassword);
+    const hasSpecialChar = /[!@#$%^&*]/.test(newPassword);
+    if (!hasUppercase || !hasLowercase || !hasNumber || !hasSpecialChar) {
+      return res.status(400).json({
+        message: "Password must contain at least 1 uppercase letter, 1 lowercase letter, 1 number, and 1 special character (!@#$%^&*)"
+      });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    if (!user.password) {
+      return res.status(400).json({ message: "Password change is not available for OAuth accounts" });
+    }
+
+    const isMatch = await comparePassword(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Current password is incorrect" });
+    }
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ message: "New password must be different from the current password" });
+    }
+
+    const hashed = await hashPassword(newPassword);
+    await prisma.user.update({ where: { id: userId }, data: { password: hashed } });
+
+    res.json({ message: "Password changed successfully" });
+  } catch (err) {
+    console.error("Change password error:", err);
     next(err);
   }
 };

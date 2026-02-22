@@ -9,7 +9,8 @@ const {
   oauthCallback,
   oauthSignup,
   getProfile,
-  updateProfile
+  updateProfile,
+  changePassword
 } = require("../controllers/auth.controller");
 const authMiddleware = require("../middleware/auth.middleware");
 
@@ -30,5 +31,6 @@ router.post("/oauth/signup", oauthSignup);  // New: Create account for OAuth use
 router.post("/add-role", authMiddleware, addRole);
 router.get("/profile", authMiddleware, getProfile);
 router.put("/profile", authMiddleware, updateProfile);
+router.put("/change-password", authMiddleware, changePassword);
 
 module.exports = router;
