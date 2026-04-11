@@ -1,7 +1,8 @@
 const { prisma } = require("../models");
 const { hashPassword, comparePassword } = require("../utils/hash");
 const { generateToken } = require("../config/jwt");
-const { generateVerificationCode, sendVerificationEmail } = require("../utils/email");
+const { generateVerificationCode, sendVerificationEmail, sendPasswordResetEmail } = require("../utils/email");
+const crypto = require("crypto");
 const { AuthenticationClient } = require("auth0");
 const axios = require("axios");
 
@@ -159,7 +160,10 @@ exports.signup = async (req, res, next) => {
           dob: dob,
           phone: phone,
           address: address,
-          idNumber: idNumber
+          idNumber: idNumber,
+          idCopyFront: req.body.idCopyFront || null,
+          idCopyBack: req.body.idCopyBack || null,
+          idCopyPdf: req.body.idCopyPdf || null,
         }
       });
     }
@@ -252,6 +256,7 @@ exports.login = async (req, res, next) => {
         fullName: user.fullName,
         hasStudentProfile,   // true/false
         hasTutorProfile,     // true/false
+        tutorStatus: user.tutor?.applicationStatus || null,
         avatar: user.student?.avatar || user.tutor?.avatar || null
       }
     });
@@ -295,19 +300,38 @@ exports.verifyEmail = async (req, res, next) => {
     }
 
     // Update user as verified
-    await prisma.user.update({
+    const verifiedUser = await prisma.user.update({
       where: { id: user.id },
       data: {
         isEmailVerified: true,
         emailVerificationCode: null,
         verificationCodeExpiry: null
+      },
+      include: {
+        student: true,
+        tutor: true
       }
     });
 
-    console.log("Email verified successfully for:", user.email);
-    res.json({ 
-      message: "Email verified successfully! You can now log in.",
-      verified: true
+    // Generate JWT so the frontend can auto-login immediately
+    const token = generateToken(verifiedUser);
+    const hasStudentProfile = !!verifiedUser.student;
+    const hasTutorProfile   = !!verifiedUser.tutor;
+
+    console.log("Email verified successfully for:", verifiedUser.email);
+    res.json({
+      message: "Email verified successfully!",
+      verified: true,
+      token,
+      user: {
+        id: verifiedUser.id,
+        email: verifiedUser.email,
+        fullName: verifiedUser.fullName,
+        hasStudentProfile,
+        hasTutorProfile,
+        tutorStatus: verifiedUser.tutor?.applicationStatus || null,
+        avatar: verifiedUser.student?.avatar || verifiedUser.tutor?.avatar || null
+      }
     });
 
   } catch (err) {
@@ -484,7 +508,10 @@ exports.addRole = async (req, res, next) => {
           dob: dob,
           phone: phone,
           address: address,
-          idNumber: idNumber
+          idNumber: idNumber,
+          idCopyFront: req.body.idCopyFront || null,
+          idCopyBack: req.body.idCopyBack || null,
+          idCopyPdf: req.body.idCopyPdf || null,
         }
       });
 
@@ -650,7 +677,8 @@ exports.oauthCallback = async (req, res, next) => {
           email: user.email,
           fullName: user.fullName,
           hasStudentProfile,
-          hasTutorProfile
+          hasTutorProfile,
+          isOAuthUser: user.isOAuthUser
         }
       };
     } else {
@@ -727,6 +755,7 @@ exports.oauthSignup = async (req, res, next) => {
         fullName: fullName.trim(),
         email: email.toLowerCase().trim(),
         password: randomPassword,
+        isOAuthUser: true,
         isEmailVerified: true, // OAuth users are auto-verified
         emailVerificationCode: null,
         verificationCodeExpiry: null
@@ -815,7 +844,10 @@ exports.oauthSignup = async (req, res, next) => {
           dob: dob,
           phone: phone,
           address: address,
-          idNumber: idNumber
+          idNumber: idNumber,
+          idCopyFront: req.body.idCopyFront || null,
+          idCopyBack: req.body.idCopyBack || null,
+          idCopyPdf: req.body.idCopyPdf || null,
         }
       });
     }
@@ -866,6 +898,7 @@ exports.getProfile = async (req, res, next) => {
       fullName: user.fullName,
       email: user.email,
       isEmailVerified: user.isEmailVerified,
+      isOAuthUser: user.isOAuthUser,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
       hasStudentProfile: !!user.student,
@@ -1035,8 +1068,8 @@ exports.changePassword = async (req, res, next) => {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    if (!user.password) {
-      return res.status(400).json({ message: "Password change is not available for OAuth accounts" });
+    if (user.isOAuthUser) {
+      return res.status(400).json({ message: "You signed up with Google. Please use 'Set Password' to create a password for email login." });
     }
 
     const isMatch = await comparePassword(currentPassword, user.password);
@@ -1054,6 +1087,123 @@ exports.changePassword = async (req, res, next) => {
     res.json({ message: "Password changed successfully" });
   } catch (err) {
     console.error("Change password error:", err);
+    next(err);
+  }
+};
+
+exports.forgotPassword = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase().trim() } });
+
+    // Always return success to prevent email enumeration
+    if (!user || !user.password) {
+      return res.json({ message: "If an account exists with this email, a password reset link has been sent." });
+    }
+
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const resetExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordResetToken: resetToken, passwordResetExpiry: resetExpiry }
+    });
+
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+    const resetLink = `${frontendUrl}/reset-password?token=${resetToken}`;
+
+    await sendPasswordResetEmail(user.email, user.fullName, resetLink);
+
+    res.json({ message: "If an account exists with this email, a password reset link has been sent." });
+  } catch (err) {
+    console.error("Forgot password error:", err);
+    next(err);
+  }
+};
+
+exports.resetPassword = async (req, res, next) => {
+  try {
+    const { token, newPassword } = req.body;
+    if (!token || !newPassword) {
+      return res.status(400).json({ message: "Token and new password are required" });
+    }
+
+    if (newPassword.length < 8 || newPassword.length > 12) {
+      return res.status(400).json({ message: "Password must be 8-12 characters long" });
+    }
+    const hasUppercase = /[A-Z]/.test(newPassword);
+    const hasLowercase = /[a-z]/.test(newPassword);
+    const hasNumber = /[0-9]/.test(newPassword);
+    const hasSpecialChar = /[!@#$%^&*]/.test(newPassword);
+    if (!hasUppercase || !hasLowercase || !hasNumber || !hasSpecialChar) {
+      return res.status(400).json({
+        message: "Password must contain at least 1 uppercase letter, 1 lowercase letter, 1 number, and 1 special character (!@#$%^&*)"
+      });
+    }
+
+    const user = await prisma.user.findFirst({
+      where: { passwordResetToken: token, passwordResetExpiry: { gt: new Date() } }
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: "Invalid or expired reset token. Please request a new password reset." });
+    }
+
+    const hashed = await hashPassword(newPassword);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { password: hashed, passwordResetToken: null, passwordResetExpiry: null }
+    });
+
+    res.json({ message: "Password reset successfully. You can now log in with your new password." });
+  } catch (err) {
+    console.error("Reset password error:", err);
+    next(err);
+  }
+};
+
+// =============================================
+// SET PASSWORD  (OAuth users only — no current password needed)
+// POST /auth/set-password   [protected]
+// After setting, isOAuthUser becomes false so future changes use /change-password
+// =============================================
+exports.setPassword = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { newPassword } = req.body;
+
+    if (!newPassword) {
+      return res.status(400).json({ message: "New password is required" });
+    }
+
+    if (newPassword.length < 8 || newPassword.length > 12) {
+      return res.status(400).json({ message: "Password must be 8-12 characters long" });
+    }
+    if (!/[A-Z]/.test(newPassword)) return res.status(400).json({ message: "Password must contain at least 1 uppercase letter" });
+    if (!/[a-z]/.test(newPassword)) return res.status(400).json({ message: "Password must contain at least 1 lowercase letter" });
+    if (!/[0-9]/.test(newPassword)) return res.status(400).json({ message: "Password must contain at least 1 number" });
+    if (!/[!@#$%^&*]/.test(newPassword)) return res.status(400).json({ message: "Password must contain at least 1 special character (!@#$%^&*)" });
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    if (!user.isOAuthUser) {
+      return res.status(400).json({ message: "You already have a password. Please use 'Change Password' instead." });
+    }
+
+    const hashed = await hashPassword(newPassword);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { password: hashed, isOAuthUser: false }
+    });
+
+    res.json({ message: "Password set successfully. You can now log in with your email and this password." });
+  } catch (err) {
+    console.error("Set password error:", err);
     next(err);
   }
 };

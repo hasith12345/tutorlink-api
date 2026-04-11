@@ -21,6 +21,9 @@ model User {
   isEmailVerified        Boolean   @default(false)
   emailVerificationCode  String?
   verificationCodeExpiry DateTime?
+  passwordResetToken     String?
+  passwordResetExpiry    DateTime?
+  isOAuthUser            Boolean   @default(false)
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
   student                Student?  // Optional - if exists, user has student role
@@ -74,6 +77,16 @@ model Tutor {
   totalReviews    Int      @default(0)    // Number of reviews
   totalStudents   Int      @default(0)    // Total students taught
   
+  // ID Verification Documents
+  idCopyFront     String?  // Front side of ID/NIC image URL (Cloudinary)
+  idCopyBack      String?  // Back side of ID/NIC image URL (Cloudinary)
+  idCopyPdf       String?  // ID copy as PDF URL (Cloudinary) - alternative to images
+
+  // Tutor Application / Onboarding
+  cvUrl           String?  // CV file URL (Cloudinary)
+  qualifications  String?  // Qualifications summary
+  applicationStatus String @default("NOT_SUBMITTED") // NOT_SUBMITTED | PENDING | APPROVED | REJECTED
+
   // Profile Status
   isVerified      Boolean  @default(false)
   isAvailable     Boolean  @default(true)
@@ -82,4 +95,26 @@ model Tutor {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  classes         Class[]  // Classes created by this tutor
+}
+
+// Class table - Tutor-created classes/sessions
+model Class {
+  id              String   @id @default(uuid()) @db.Uuid
+  tutorId         String   @db.Uuid
+  subject         String
+  description     String?
+  venue           String?
+  mode            String   // "online" | "physical"
+  location        String?
+  date            DateTime
+  time            String   // e.g. "4:00 PM"
+  duration        String   // e.g. "2 hours"
+  fees            Int      // in LKR (e.g., 2500)
+  maxStudents     Int      @default(10)
+  enrolledCount   Int      @default(0)
+  status          String   @default("ACTIVE") // ACTIVE | CANCELLED | COMPLETED
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  tutor           Tutor    @relation(fields: [tutorId], references: [id], onDelete: Cascade)
 }

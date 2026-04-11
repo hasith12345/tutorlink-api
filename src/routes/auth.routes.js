@@ -10,7 +10,10 @@ const {
   oauthSignup,
   getProfile,
   updateProfile,
-  changePassword
+  changePassword,
+  setPassword,
+  forgotPassword,
+  resetPassword
 } = require("../controllers/auth.controller");
 const authMiddleware = require("../middleware/auth.middleware");
 
@@ -19,8 +22,22 @@ router.post("/signup", (req, res, next) => {
   next();
 }, signup);
 router.post("/login", login);
+router.post("/check-email", async (req, res) => {
+  const { prisma } = require("../models");
+  const { email } = req.body;
+  if (!email || typeof email !== "string") {
+    return res.status(400).json({ message: "Email is required" });
+  }
+  const existing = await prisma.user.findUnique({
+    where: { email: email.toLowerCase().trim() },
+    select: { id: true }
+  });
+  return res.json({ exists: !!existing });
+});
 router.post("/verify-email", verifyEmail);
 router.post("/resend-verification", resendVerificationCode);
+router.post("/forgot-password", forgotPassword);
+router.post("/reset-password", resetPassword);
 
 // ✅ OAuth Routes
 router.get("/oauth/login", oauthLogin);
@@ -32,5 +49,6 @@ router.post("/add-role", authMiddleware, addRole);
 router.get("/profile", authMiddleware, getProfile);
 router.put("/profile", authMiddleware, updateProfile);
 router.put("/change-password", authMiddleware, changePassword);
+router.put("/set-password", authMiddleware, setPassword);
 
 module.exports = router;

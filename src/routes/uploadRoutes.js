@@ -1,4 +1,5 @@
 const express = require("express");
+const multer = require("multer");
 const upload = require("../middleware/upload");
 const cloudinary = require("../config/cloudinary");
 const streamifier = require("streamifier");
@@ -6,6 +7,20 @@ const authMiddleware = require("../middleware/auth.middleware");
 const { prisma } = require("../models");
 
 const router = express.Router();
+
+// Multer config for ID copy uploads: images (5 MB each) + PDF (10 MB)
+const idCopyUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  fileFilter: (req, file, cb) => {
+    const allowed = ["image/jpeg", "image/jpg", "image/png", "image/webp", "application/pdf"];
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only JPEG, PNG, WebP images and PDF files are allowed"), false);
+    }
+  },
+});
 
 // Helper: extract Cloudinary public_id from a secure_url
 // e.g. https://res.cloudinary.com/demo/image/upload/v123/tutorlink/avatars/abc.jpg
@@ -75,7 +90,9 @@ router.post("/student-avatar", authMiddleware, upload.single("image"), async (re
     await deleteOldAvatar(student.avatar);
 
     // Upload new image to Cloudinary
-    const result = await streamUploadToCloudinary(req.file.buffer, "tutorlink/avatars");
+    const result = await streamUploadToCloudinary(req.file.buffer, "tutorlink/avatars", {
+      transformation: [{ width: 400, height: 400, crop: "fill", gravity: "face" }],
+    });
 
     // Update student avatar in database
     await prisma.student.update({
@@ -112,7 +129,9 @@ router.post("/tutor-avatar", authMiddleware, upload.single("image"), async (req,
     await deleteOldAvatar(tutor.avatar);
 
     // Upload new image to Cloudinary
-    const result = await streamUploadToCloudinary(req.file.buffer, "tutorlink/avatars");
+    const result = await streamUploadToCloudinary(req.file.buffer, "tutorlink/avatars", {
+      transformation: [{ width: 400, height: 400, crop: "fill", gravity: "face" }],
+    });
 
     // Update tutor avatar in database
     await prisma.tutor.update({
@@ -130,11 +149,53 @@ router.post("/tutor-avatar", authMiddleware, upload.single("image"), async (req,
   }
 });
 
+// ✅ ID copy upload (unauthenticated - used during tutor signup before account creation)
+// Accepts: image/jpeg, image/png, image/webp (max 5 MB each) OR application/pdf (max 10 MB)
+// Returns: { url, publicId, resourceType }
+router.post("/id-copy", idCopyUpload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+
+    const isPdf = req.file.mimetype === "application/pdf";
+
+    // Enforce image size cap (5 MB) even though the multer limit is 10 MB
+    if (!isPdf && req.file.size > 5 * 1024 * 1024) {
+      return res.status(400).json({ message: "Image files must be 5 MB or smaller" });
+    }
+
+    const uploadOptions = isPdf
+      ? { resource_type: "raw" }
+      : { resource_type: "image" };
+
+    const result = await streamUploadToCloudinary(
+      req.file.buffer,
+      "tutorlink/id-copies",
+      uploadOptions
+    );
+
+    res.status(200).json({
+      url: result.secure_url,
+      publicId: result.public_id,
+      resourceType: isPdf ? "pdf" : "image",
+    });
+  } catch (error) {
+    console.error("ID copy upload failed:", error);
+    // Handle multer file-size error
+    if (error.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({ message: "File is too large. Maximum size is 10 MB for PDFs and 5 MB for images." });
+    }
+    res.status(500).json({ message: "ID copy upload failed", error: error.message });
+  }
+});
+
 // Helper: upload buffer to Cloudinary via stream
-function streamUploadToCloudinary(buffer, folder) {
+function streamUploadToCloudinary(buffer, folder, options = {}) {
   return new Promise((resolve, reject) => {
+    const uploadOptions = { folder, ...options };
     const stream = cloudinary.uploader.upload_stream(
-      { folder, transformation: [{ width: 400, height: 400, crop: "fill", gravity: "face" }] },
+      uploadOptions,
       (error, result) => {
         if (result) resolve(result);
         else reject(error);
