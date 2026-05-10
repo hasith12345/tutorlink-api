@@ -10,6 +10,7 @@ const {
   getMyClasses,
   updateClass,
   cancelClass,
+  deleteClass,
   getClassById,
   getPendingApplications,
   getAllApplications,
@@ -28,6 +29,7 @@ router.get("/classes", authMiddleware, getMyClasses);
 router.get("/classes/:id", authMiddleware, getClassById);
 router.put("/classes/:id", authMiddleware, updateClass);
 router.put("/classes/:id/cancel", authMiddleware, cancelClass);
+router.delete("/classes/:id", authMiddleware, deleteClass);
 
 // ✅ Admin Routes (authenticated - should add admin check in production)
 router.get("/admin/applications", authMiddleware, getAllApplications);

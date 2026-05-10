@@ -14,7 +14,11 @@ const {
   setPassword,
   forgotPassword,
   resetPassword,
-  getCurrentUser
+  getCurrentUser,
+  getAllUsers,
+  banUser,
+  unbanUser,
+  adminLogin
 } = require("../controllers/auth.controller");
 const authMiddleware = require("../middleware/auth.middleware");
 
@@ -52,5 +56,11 @@ router.get("/profile", authMiddleware, getProfile);
 router.put("/profile", authMiddleware, updateProfile);
 router.put("/change-password", authMiddleware, changePassword);
 router.put("/set-password", authMiddleware, setPassword);
+
+// ✅ Admin routes
+router.post("/admin/login", adminLogin);
+router.get("/admin/users", authMiddleware, getAllUsers);
+router.put("/admin/users/:userId/ban", authMiddleware, banUser);
+router.put("/admin/users/:userId/unban", authMiddleware, unbanUser);
 
 module.exports = router;

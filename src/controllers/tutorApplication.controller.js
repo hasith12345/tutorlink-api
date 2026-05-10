@@ -30,6 +30,8 @@ exports.submitTutorApplication = async (req, res, next) => {
       return res.status(400).json({ message: "Your application has already been approved." });
     }
 
+    // REJECTED: allow fresh resubmission (data was already cleared on rejection)
+
     // Update tutor profile with application data
     const updatedTutor = await prisma.tutor.update({
       where: { userId },
@@ -155,15 +157,16 @@ exports.createClass = async (req, res, next) => {
       return res.status(403).json({ message: "You must be an approved tutor to create classes." });
     }
 
-    const { subject, description, venue, mode, location, date, time, duration, fees, maxStudents } = req.body;
+    const { subject, description, venue, mode, location, schedule, time, duration, fees, maxStudents } = req.body;
 
     if (!subject) return res.status(400).json({ message: "Subject is required" });
     if (!mode) return res.status(400).json({ message: "Mode (online/physical) is required" });
-    if (!date) return res.status(400).json({ message: "Date is required" });
+    if (!schedule || !Array.isArray(schedule) || schedule.length === 0) return res.status(400).json({ message: "At least one class day is required" });
     if (!time) return res.status(400).json({ message: "Time is required" });
     if (!duration) return res.status(400).json({ message: "Duration is required" });
     if (!fees && fees !== 0) return res.status(400).json({ message: "Fees are required" });
 
+    // Use today as the base date for recurring classes
     const newClass = await prisma.class.create({
       data: {
         tutorId: tutor.id,
@@ -172,7 +175,8 @@ exports.createClass = async (req, res, next) => {
         venue: venue || null,
         mode,
         location: location || null,
-        date: new Date(date),
+        date: new Date(),
+        schedule: schedule,
         time,
         duration,
         fees: parseInt(fees),
@@ -283,6 +287,28 @@ exports.cancelClass = async (req, res, next) => {
   }
 };
 
+// ✅ Delete a class permanently
+exports.deleteClass = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const classId = req.params.id;
+
+    const tutor = await prisma.tutor.findUnique({ where: { userId } });
+    if (!tutor) return res.status(404).json({ message: "Tutor profile not found" });
+
+    const existingClass = await prisma.class.findUnique({ where: { id: classId } });
+    if (!existingClass || existingClass.tutorId !== tutor.id) {
+      return res.status(404).json({ message: "Class not found" });
+    }
+
+    await prisma.class.delete({ where: { id: classId } });
+    res.json({ message: "Class deleted successfully" });
+  } catch (err) {
+    console.error("Delete class error:", err);
+    next(err);
+  }
+};
+
 // ✅ Get a single class by ID
 exports.getClassById = async (req, res, next) => {
   try {
@@ -341,7 +367,28 @@ exports.getAllApplications = async (req, res, next) => {
     const applications = await prisma.tutor.findMany({
       where,
       include: {
-        user: { select: { id: true, fullName: true, email: true, createdAt: true } },
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            createdAt: true,
+            isEmailVerified: true,
+            student: {
+              select: {
+                id: true,
+                dob: true,
+                phone: true,
+                address: true,
+                schoolGrade: true,
+                schoolName: true,
+                parentName: true,
+                parentPhone: true,
+                avatar: true,
+              },
+            },
+          },
+        },
       },
       orderBy: { updatedAt: "desc" },
     });
@@ -398,12 +445,22 @@ exports.rejectApplication = async (req, res, next) => {
       return res.status(400).json({ message: "Application is not in PENDING status" });
     }
 
+    // Clear all application data so the tutor can reapply fresh
     const rejected = await prisma.tutor.update({
       where: { id: tutorId },
-      data: { applicationStatus: "REJECTED" },
+      data: {
+        applicationStatus: "REJECTED",
+        qualifications: null,
+        subjects: [],
+        experience: null,
+        cvUrl: null,
+        idCopyFront: null,
+        idCopyBack: null,
+        idCopyPdf: null,
+      },
     });
 
-    console.log("Tutor application rejected:", tutorId);
+    console.log("Tutor application rejected and data cleared:", tutorId);
     res.json({ message: "Tutor application rejected", tutor: rejected });
   } catch (err) {
     console.error("Reject application error:", err);

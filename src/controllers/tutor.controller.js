@@ -7,9 +7,11 @@ exports.searchTutors = async (req, res) => {
   try {
     const { subject, location, learningMode, limit = 50 } = req.query;
 
-    // Build search filters
+    // Build search filters — only show APPROVED tutors who have at least one active class
     const filters = {
       isAvailable: true,
+      applicationStatus: "APPROVED",
+      classes: { some: { status: "ACTIVE" } },
     };
 
     // Search in subject or subjects array
@@ -45,9 +47,9 @@ exports.searchTutors = async (req, res) => {
       };
     }
 
-    // Filter by learning mode
+    // Filter by class mode (not tutor's learningMode)
     if (learningMode && ["online", "physical", "hybrid"].includes(learningMode)) {
-      filters.learningMode = learningMode;
+      filters.classes = { some: { status: "ACTIVE", mode: learningMode } };
     }
 
     // Fetch tutors with user data
@@ -56,10 +58,13 @@ exports.searchTutors = async (req, res) => {
       include: {
         user: {
           select: {
-            id: true,
-            fullName: true,
-            email: true,
+            id: true, fullName: true, email: true,
+            student: { select: { avatar: true } },
           },
+        },
+        classes: {
+          where: { status: "ACTIVE" },
+          orderBy: { fees: "asc" },
         },
       },
       take: parseInt(limit),
@@ -87,7 +92,9 @@ exports.searchTutors = async (req, res) => {
       totalReviews: tutor.totalReviews,
       totalStudents: tutor.totalStudents,
       isVerified: tutor.isVerified,
-      avatar: tutor.avatar,
+      avatar: tutor.avatar || tutor.user.student?.avatar || null,
+      classes: tutor.classes,
+      lowestFee: tutor.classes.length > 0 ? Math.min(...tutor.classes.map(c => c.fees)) : null,
     }));
 
     res.status(200).json({
@@ -196,7 +203,12 @@ exports.getTutorById = async (req, res) => {
             id: true,
             fullName: true,
             email: true,
+            student: { select: { avatar: true } },
           },
+        },
+        classes: {
+          where: { status: "ACTIVE" },
+          orderBy: { fees: "asc" },
         },
       },
     });
@@ -227,9 +239,11 @@ exports.getTutorById = async (req, res) => {
         totalReviews: tutor.totalReviews,
         totalStudents: tutor.totalStudents,
         isVerified: tutor.isVerified,
-        avatar: tutor.avatar,
+        avatar: tutor.avatar || tutor.user.student?.avatar || null,
         phone: tutor.phone,
         address: tutor.address,
+        qualifications: tutor.qualifications,
+        classes: tutor.classes,
       },
     });
   } catch (error) {
