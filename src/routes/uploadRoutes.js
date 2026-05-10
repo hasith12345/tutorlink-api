@@ -22,6 +22,28 @@ const idCopyUpload = multer({
   },
 });
 
+// Multer config for CV uploads: PDF, DOC, DOCX, images (max 5 MB)
+const cvUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+  fileFilter: (req, file, cb) => {
+    const allowed = [
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/webp"
+    ];
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only PDF, DOC, DOCX, and image files are allowed"), false);
+    }
+  },
+});
+
 // Helper: extract Cloudinary public_id from a secure_url
 // e.g. https://res.cloudinary.com/demo/image/upload/v123/tutorlink/avatars/abc.jpg
 // → "tutorlink/avatars/abc"
@@ -187,6 +209,49 @@ router.post("/id-copy", idCopyUpload.single("file"), async (req, res) => {
       return res.status(400).json({ message: "File is too large. Maximum size is 10 MB for PDFs and 5 MB for images." });
     }
     res.status(500).json({ message: "ID copy upload failed", error: error.message });
+  }
+});
+
+// ✅ CV upload (unauthenticated - used during tutor signup before account creation)
+// Accepts: application/pdf, application/msword, .docx, images (max 5 MB)
+// Returns: { url, publicId, resourceType }
+router.post("/cv", cvUpload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+
+    const mimeType = req.file.mimetype;
+    const isImage = mimeType.startsWith("image/");
+
+    // Determine resource type for Cloudinary
+    let uploadOptions = {};
+    if (mimeType === "application/pdf") {
+      uploadOptions = { resource_type: "raw" };
+    } else if (mimeType === "application/msword" || mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+      uploadOptions = { resource_type: "raw" }; // Store DOC/DOCX as raw files
+    } else if (isImage) {
+      uploadOptions = { resource_type: "image" };
+    }
+
+    const result = await streamUploadToCloudinary(
+      req.file.buffer,
+      "tutorlink/cvs",
+      uploadOptions
+    );
+
+    res.status(200).json({
+      url: result.secure_url,
+      publicId: result.public_id,
+      resourceType: isImage ? "image" : "document",
+    });
+  } catch (error) {
+    console.error("CV upload failed:", error);
+    // Handle multer file-size error
+    if (error.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({ message: "File is too large. Maximum size is 5 MB." });
+    }
+    res.status(500).json({ message: "CV upload failed", error: error.message });
   }
 });
 
