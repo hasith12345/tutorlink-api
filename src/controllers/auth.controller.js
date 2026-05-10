@@ -226,9 +226,17 @@ exports.login = async (req, res, next) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
+    // ✅ Check if account is banned
+    if (user.isBanned) {
+      return res.status(403).json({
+        message: "Your account has been banned. Please contact admin.",
+        isBanned: true
+      });
+    }
+
     // ✅ Check if email is verified (MUST be verified before login)
     if (!user.isEmailVerified) {
-      return res.status(403).json({ 
+      return res.status(403).json({
         message: "Please verify your email before logging in",
         requiresVerification: true,
         email: user.email
@@ -1260,6 +1268,89 @@ exports.getCurrentUser = async (req, res, next) => {
     });
   } catch (err) {
     console.error("Get current user error:", err);
+    next(err);
+  }
+};
+
+// ✅ Admin: Get all users
+exports.getAllUsers = async (req, res, next) => {
+  try {
+    const users = await prisma.user.findMany({
+      include: {
+        student: { select: { id: true, avatar: true, phone: true, schoolGrade: true, schoolName: true } },
+        tutor: { select: { id: true, avatar: true, phone: true, applicationStatus: true } }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+
+    const formatted = users.map((u) => ({
+      id: u.id,
+      fullName: u.fullName,
+      email: u.email,
+      isEmailVerified: u.isEmailVerified,
+      isBanned: u.isBanned,
+      createdAt: u.createdAt,
+      hasStudentProfile: !!u.student,
+      hasTutorProfile: !!u.tutor,
+      tutorStatus: u.tutor?.applicationStatus || null,
+      avatar: u.student?.avatar || u.tutor?.avatar || null,
+      student: u.student,
+      tutor: u.tutor,
+    }));
+
+    res.json({ users: formatted, total: formatted.length });
+  } catch (err) {
+    console.error("Get all users error:", err);
+    next(err);
+  }
+};
+
+// ✅ Admin: Ban a user
+exports.banUser = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { isBanned: true },
+      select: { id: true, fullName: true, email: true, isBanned: true }
+    });
+    res.json({ message: "User banned successfully", user });
+  } catch (err) {
+    console.error("Ban user error:", err);
+    next(err);
+  }
+};
+
+// ✅ Admin: Unban a user
+exports.unbanUser = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { isBanned: false },
+      select: { id: true, fullName: true, email: true, isBanned: true }
+    });
+    res.json({ message: "User unbanned successfully", user });
+  } catch (err) {
+    console.error("Unban user error:", err);
+    next(err);
+  }
+};
+
+// ✅ Admin login — issues a special admin JWT
+exports.adminLogin = async (req, res, next) => {
+  try {
+    const { username, password } = req.body;
+    if (username !== "admin" || password !== "admin") {
+      return res.status(401).json({ message: "Invalid admin credentials" });
+    }
+    const token = require("jsonwebtoken").sign(
+      { id: "admin", role: "admin", isAdmin: true },
+      process.env.JWT_SECRET || "tutorlink_jwt_secret_key_2024",
+      { expiresIn: "24h" }
+    );
+    res.json({ token });
+  } catch (err) {
     next(err);
   }
 };

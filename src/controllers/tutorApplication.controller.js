@@ -30,6 +30,8 @@ exports.submitTutorApplication = async (req, res, next) => {
       return res.status(400).json({ message: "Your application has already been approved." });
     }
 
+    // REJECTED: allow fresh resubmission (data was already cleared on rejection)
+
     // Update tutor profile with application data
     const updatedTutor = await prisma.tutor.update({
       where: { userId },
@@ -398,12 +400,22 @@ exports.rejectApplication = async (req, res, next) => {
       return res.status(400).json({ message: "Application is not in PENDING status" });
     }
 
+    // Clear all application data so the tutor can reapply fresh
     const rejected = await prisma.tutor.update({
       where: { id: tutorId },
-      data: { applicationStatus: "REJECTED" },
+      data: {
+        applicationStatus: "REJECTED",
+        qualifications: null,
+        subjects: [],
+        experience: null,
+        cvUrl: null,
+        idCopyFront: null,
+        idCopyBack: null,
+        idCopyPdf: null,
+      },
     });
 
-    console.log("Tutor application rejected:", tutorId);
+    console.log("Tutor application rejected and data cleared:", tutorId);
     res.json({ message: "Tutor application rejected", tutor: rejected });
   } catch (err) {
     console.error("Reject application error:", err);
