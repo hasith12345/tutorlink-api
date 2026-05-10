@@ -164,6 +164,11 @@ exports.signup = async (req, res, next) => {
           idCopyFront: req.body.idCopyFront || null,
           idCopyBack: req.body.idCopyBack || null,
           idCopyPdf: req.body.idCopyPdf || null,
+          qualifications: req.body.qualifications || null,
+          subjects: req.body.subjects || [],
+          experience: req.body.experience || null,
+          cvUrl: req.body.cvUrl || null,
+          applicationStatus: (req.body.qualifications && req.body.subjects && req.body.subjects.length > 0) ? "PENDING" : "NOT_SUBMITTED"
         }
       });
     }
@@ -485,16 +490,27 @@ exports.addRole = async (req, res, next) => {
     if (role === "tutor") {
       const { dob, phone, address, idNumber } = roleData;
 
+      // ✅ If user has student profile, use their existing DOB, Phone, Address
+      let tutorDob = dob;
+      let tutorPhone = phone;
+      let tutorAddress = address;
+
+      if (user.student) {
+        tutorDob = user.student.dob || dob;
+        tutorPhone = user.student.phone || phone;
+        tutorAddress = user.student.address || address;
+      }
+
       // Validate required fields
-      if (!dob) {
+      if (!tutorDob) {
         return res.status(400).json({ message: "Date of birth is required" });
       }
 
-      if (!phone) {
+      if (!tutorPhone) {
         return res.status(400).json({ message: "Phone number is required" });
       }
 
-      if (!address) {
+      if (!tutorAddress) {
         return res.status(400).json({ message: "Address is required" });
       }
 
@@ -505,18 +521,23 @@ exports.addRole = async (req, res, next) => {
       await prisma.tutor.create({
         data: {
           userId: user.id,
-          dob: dob,
-          phone: phone,
-          address: address,
+          dob: tutorDob,
+          phone: tutorPhone,
+          address: tutorAddress,
           idNumber: idNumber,
           idCopyFront: req.body.idCopyFront || null,
           idCopyBack: req.body.idCopyBack || null,
           idCopyPdf: req.body.idCopyPdf || null,
+          qualifications: req.body.qualifications || null,
+          subjects: req.body.subjects || [],
+          experience: req.body.experience || null,
+          cvUrl: req.body.cvUrl || null,
+          applicationStatus: (req.body.qualifications && req.body.subjects && req.body.subjects.length > 0) ? "PENDING" : "NOT_SUBMITTED"
         }
       });
 
       console.log(`Tutor profile added for user: ${user.email}`);
-      return res.status(201).json({ 
+      return res.status(201).json({
         message: "Tutor profile added successfully",
         hasStudentProfile: !!user.student,
         hasTutorProfile: true
@@ -848,6 +869,11 @@ exports.oauthSignup = async (req, res, next) => {
           idCopyFront: req.body.idCopyFront || null,
           idCopyBack: req.body.idCopyBack || null,
           idCopyPdf: req.body.idCopyPdf || null,
+          qualifications: req.body.qualifications || null,
+          subjects: req.body.subjects || [],
+          experience: req.body.experience || null,
+          cvUrl: req.body.cvUrl || null,
+          applicationStatus: (req.body.qualifications && req.body.subjects && req.body.subjects.length > 0) ? "PENDING" : "NOT_SUBMITTED"
         }
       });
     }
@@ -1204,6 +1230,36 @@ exports.setPassword = async (req, res, next) => {
     res.json({ message: "Password set successfully. You can now log in with your email and this password." });
   } catch (err) {
     console.error("Set password error:", err);
+    next(err);
+  }
+};
+
+// ✅ Get current user with role flags (for dashboard sync)
+exports.getCurrentUser = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { student: true, tutor: true }
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        hasStudentProfile: !!user.student,
+        hasTutorProfile: !!user.tutor,
+        tutorStatus: user.tutor?.applicationStatus || null,
+        avatar: user.student?.avatar || user.tutor?.avatar || null
+      }
+    });
+  } catch (err) {
+    console.error("Get current user error:", err);
     next(err);
   }
 };

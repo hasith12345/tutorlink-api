@@ -20,7 +20,9 @@ exports.submitTutorApplication = async (req, res, next) => {
       return res.status(404).json({ message: "Tutor profile not found. Please sign up as a tutor first." });
     }
 
-    if (tutor.applicationStatus === "PENDING") {
+    // Allow resubmission if PENDING but no qualifications/subjects were ever provided
+    const alreadyHasDetails = tutor.qualifications && tutor.subjects && tutor.subjects.length > 0;
+    if (tutor.applicationStatus === "PENDING" && alreadyHasDetails) {
       return res.status(400).json({ message: "Your application is already under review." });
     }
 
@@ -74,8 +76,23 @@ exports.getTutorApplicationStatus = async (req, res, next) => {
       return res.status(404).json({ message: "Tutor profile not found" });
     }
 
+    // If status is PENDING but no qualifications/subjects were provided, treat as NOT_SUBMITTED
+    // This handles accounts created before the conditional status logic was added
+    const hasDetails = tutor.qualifications && tutor.subjects && tutor.subjects.length > 0;
+    const effectiveStatus = (tutor.applicationStatus === "PENDING" && !hasDetails)
+      ? "NOT_SUBMITTED"
+      : tutor.applicationStatus;
+
+    // Correct the DB record so it's consistent going forward
+    if (effectiveStatus === "NOT_SUBMITTED" && tutor.applicationStatus === "PENDING") {
+      await prisma.tutor.update({
+        where: { userId },
+        data: { applicationStatus: "NOT_SUBMITTED" }
+      });
+    }
+
     res.json({
-      tutorStatus: tutor.applicationStatus,
+      tutorStatus: effectiveStatus,
       profile: tutor,
     });
   } catch (err) {
