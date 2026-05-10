@@ -343,7 +343,28 @@ exports.getAllApplications = async (req, res, next) => {
     const applications = await prisma.tutor.findMany({
       where,
       include: {
-        user: { select: { id: true, fullName: true, email: true, createdAt: true } },
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            createdAt: true,
+            isEmailVerified: true,
+            student: {
+              select: {
+                id: true,
+                dob: true,
+                phone: true,
+                address: true,
+                schoolGrade: true,
+                schoolName: true,
+                parentName: true,
+                parentPhone: true,
+                avatar: true,
+              },
+            },
+          },
+        },
       },
       orderBy: { updatedAt: "desc" },
     });

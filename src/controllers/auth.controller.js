@@ -1017,7 +1017,7 @@ exports.updateProfile = async (req, res, next) => {
 
     // Update tutor profile if it exists and data is provided
     if (currentUser.tutor && tutor) {
-      const { dob, phone, address, idNumber } = tutor;
+      const { dob, phone, address, idNumber, qualifications, subjects, experience } = tutor;
 
       await prisma.tutor.update({
         where: { userId: userId },
@@ -1025,7 +1025,10 @@ exports.updateProfile = async (req, res, next) => {
           ...(dob !== undefined && { dob }),
           ...(phone !== undefined && { phone }),
           ...(address !== undefined && { address }),
-          ...(idNumber !== undefined && { idNumber })
+          ...(idNumber !== undefined && { idNumber }),
+          ...(qualifications !== undefined && { qualifications }),
+          ...(subjects !== undefined && { subjects: Array.isArray(subjects) ? subjects : [subjects] }),
+          ...(experience !== undefined && { experience }),
         }
       });
     }
