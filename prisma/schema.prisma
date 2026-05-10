@@ -109,6 +109,7 @@ model Class {
   mode            String   // "online" | "physical"
   location        String?
   date            DateTime
+  schedule        String[] // e.g. ["MON","WED","FRI"] — recurring days
   time            String   // e.g. "4:00 PM"
   duration        String   // e.g. "2 hours"
   fees            Int      // in LKR (e.g., 2500)

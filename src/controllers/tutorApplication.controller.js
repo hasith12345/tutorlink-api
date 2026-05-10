@@ -157,15 +157,16 @@ exports.createClass = async (req, res, next) => {
       return res.status(403).json({ message: "You must be an approved tutor to create classes." });
     }
 
-    const { subject, description, venue, mode, location, date, time, duration, fees, maxStudents } = req.body;
+    const { subject, description, venue, mode, location, schedule, time, duration, fees, maxStudents } = req.body;
 
     if (!subject) return res.status(400).json({ message: "Subject is required" });
     if (!mode) return res.status(400).json({ message: "Mode (online/physical) is required" });
-    if (!date) return res.status(400).json({ message: "Date is required" });
+    if (!schedule || !Array.isArray(schedule) || schedule.length === 0) return res.status(400).json({ message: "At least one class day is required" });
     if (!time) return res.status(400).json({ message: "Time is required" });
     if (!duration) return res.status(400).json({ message: "Duration is required" });
     if (!fees && fees !== 0) return res.status(400).json({ message: "Fees are required" });
 
+    // Use today as the base date for recurring classes
     const newClass = await prisma.class.create({
       data: {
         tutorId: tutor.id,
@@ -174,7 +175,8 @@ exports.createClass = async (req, res, next) => {
         venue: venue || null,
         mode,
         location: location || null,
-        date: new Date(date),
+        date: new Date(),
+        schedule: schedule,
         time,
         duration,
         fees: parseInt(fees),
@@ -281,6 +283,28 @@ exports.cancelClass = async (req, res, next) => {
     res.json({ message: "Class cancelled successfully", class: cancelled });
   } catch (err) {
     console.error("Cancel class error:", err);
+    next(err);
+  }
+};
+
+// ✅ Delete a class permanently
+exports.deleteClass = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const classId = req.params.id;
+
+    const tutor = await prisma.tutor.findUnique({ where: { userId } });
+    if (!tutor) return res.status(404).json({ message: "Tutor profile not found" });
+
+    const existingClass = await prisma.class.findUnique({ where: { id: classId } });
+    if (!existingClass || existingClass.tutorId !== tutor.id) {
+      return res.status(404).json({ message: "Class not found" });
+    }
+
+    await prisma.class.delete({ where: { id: classId } });
+    res.json({ message: "Class deleted successfully" });
+  } catch (err) {
+    console.error("Delete class error:", err);
     next(err);
   }
 };
