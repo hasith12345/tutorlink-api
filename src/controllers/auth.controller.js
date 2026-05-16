@@ -168,7 +168,7 @@ exports.signup = async (req, res, next) => {
           subjects: req.body.subjects || [],
           experience: req.body.experience || null,
           cvUrl: req.body.cvUrl || null,
-          applicationStatus: (req.body.qualifications && req.body.subjects && req.body.subjects.length > 0) ? "PENDING" : "NOT_SUBMITTED"
+          applicationStatus: "PENDING"
         }
       });
     }
