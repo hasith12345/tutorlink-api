@@ -5,6 +5,7 @@ const authRoutes = require("./routes/auth.routes");
 const tutorRoutes = require("./routes/tutor.routes");
 const uploadRoutes = require("./routes/uploadRoutes");
 const tutorApplicationRoutes = require("./routes/tutorApplication.routes");
+const paymentRoutes = require("./routes/payment.routes");
 const errorMiddleware = require("./middleware/error.middleware.js");
 
 const app = express();
@@ -30,6 +31,9 @@ app.use("/api/upload", uploadRoutes);
 
 // ✅ TUTOR APPLICATION & CLASS ROUTES
 app.use("/api/tutor", tutorApplicationRoutes);
+
+// ✅ PAYMENT ROUTES
+app.use("/api/payments", paymentRoutes);
 
 // ✅ ERROR HANDLER (LAST)
 app.use(errorMiddleware);

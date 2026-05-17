@@ -35,8 +35,8 @@ model User {
 // - Created when user signs up as Student OR adds Student role later
 // - userId is UNIQUE - a user can have only ONE student profile
 model Student {
-  id             String   @id @default(uuid()) @db.Uuid
-  userId         String   @unique @db.Uuid  // One-to-one with User
+  id             String       @id @default(uuid()) @db.Uuid
+  userId         String       @unique @db.Uuid  // One-to-one with User
   dob            String?
   phone          String?
   address        String?
@@ -44,10 +44,11 @@ model Student {
   schoolName     String?
   parentName     String?
   parentPhone    String?
-  avatar         String?  // Profile image URL (Cloudinary)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  avatar         String?      // Profile image URL (Cloudinary)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  enrollments    Enrollment[]
 }
 
 // Tutor profile table
@@ -115,8 +116,36 @@ model Class {
   fees            Int      // in LKR (e.g., 2500)
   maxStudents     Int      @default(10)
   enrolledCount   Int      @default(0)
-  status          String   @default("ACTIVE") // ACTIVE | CANCELLED | COMPLETED
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  tutor           Tutor    @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  status          String       @default("ACTIVE") // ACTIVE | CANCELLED | COMPLETED
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  tutor           Tutor        @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  enrollments     Enrollment[]
+}
+
+model Enrollment {
+  id          String    @id @default(uuid()) @db.Uuid
+  studentId   String    @db.Uuid
+  classId     String    @db.Uuid
+  status      String    @default("ACTIVE")   // ACTIVE | CANCELLED
+  enrolledAt  DateTime  @default(now())
+  student     Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  class       Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  payment     Payment?
+
+  @@unique([studentId, classId])
+}
+
+model Payment {
+  id               String      @id @default(uuid()) @db.Uuid
+  enrollmentId     String      @unique @db.Uuid
+  stripePaymentId  String      @unique
+  totalAmount      Int         // full class fees in LKR
+  tutorAmount      Int         // 92% of totalAmount
+  platformAmount   Int         // 8% of totalAmount
+  currency         String      @default("lkr")
+  status           String      @default("PENDING")  // PENDING | COMPLETED | FAILED
+  paidAt           DateTime?
+  createdAt        DateTime    @default(now())
+  enrollment       Enrollment  @relation(fields: [enrollmentId], references: [id])
 }
