@@ -226,6 +226,7 @@ exports.getStudentEnrollments = async (req, res) => {
           duration: e.class.duration,
           fees: e.class.fees,
           venue: e.class.venue,
+          meetingLink: e.class.meetingLink,
           tutorId: e.class.tutorId,
           tutorName: e.class.tutor.user.fullName,
           tutorAvatar: e.class.tutor.avatar,
@@ -289,5 +290,67 @@ exports.getTutorEarnings = async (req, res) => {
   } catch (err) {
     console.error("getTutorEarnings error:", err);
     return res.status(500).json({ message: "Failed to fetch earnings" });
+  }
+};
+
+// GET /api/payments/tutor/students
+exports.getTutorStudents = async (req, res) => {
+  try {
+    const tutor = await prisma.tutor.findFirst({ where: { userId: req.user.id } });
+    if (!tutor) return res.status(403).json({ message: "Tutor profile required" });
+
+    const enrollments = await prisma.enrollment.findMany({
+      where: {
+        status: "ACTIVE",
+        class: { tutorId: tutor.id },
+      },
+      orderBy: { enrolledAt: "desc" },
+      include: {
+        student: {
+          include: { user: { select: { fullName: true, email: true } } },
+        },
+        class: {
+          select: { id: true, subject: true, description: true, schedule: true, mode: true, fees: true, time: true },
+        },
+        payment: { select: { totalAmount: true, status: true, paidAt: true } },
+      },
+    });
+
+    // Deduplicate by student — each student may be enrolled in multiple classes
+    const studentsMap = new Map();
+    for (const e of enrollments) {
+      const sid = e.student.id;
+      if (!studentsMap.has(sid)) {
+        studentsMap.set(sid, {
+          id: sid,
+          fullName: e.student.user.fullName,
+          email: e.student.user.email,
+          avatar: e.student.avatar || null,
+          enrolledClasses: [],
+          enrolledAt: e.enrolledAt,
+        });
+      }
+      studentsMap.get(sid).enrolledClasses.push({
+        enrollmentId: e.id,
+        classId: e.class.id,
+        subject: e.class.subject,
+        description: e.class.description || null,
+        schedule: e.class.schedule,
+        mode: e.class.mode,
+        fees: e.class.fees,
+        time: e.class.time,
+        enrolledAt: e.enrolledAt,
+        payment: e.payment,
+      });
+    }
+
+    return res.json({
+      students: Array.from(studentsMap.values()),
+      totalStudents: studentsMap.size,
+      totalEnrollments: enrollments.length,
+    });
+  } catch (err) {
+    console.error("getTutorStudents error:", err);
+    return res.status(500).json({ message: "Failed to fetch students" });
   }
 };

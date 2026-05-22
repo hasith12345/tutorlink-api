@@ -116,11 +116,39 @@ model Class {
   fees            Int      // in LKR (e.g., 2500)
   maxStudents     Int      @default(10)
   enrolledCount   Int      @default(0)
+  meetingLink     String?  // Zoom / Meet / Teams URL
   status          String       @default("ACTIVE") // ACTIVE | CANCELLED | COMPLETED
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
   tutor           Tutor        @relation(fields: [tutorId], references: [id], onDelete: Cascade)
   enrollments     Enrollment[]
+  folders         ClassFolder[]
+}
+
+model ClassFolder {
+  id        String          @id @default(uuid()) @db.Uuid
+  classId   String          @db.Uuid
+  name      String
+  order     Int             @default(0)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  class     Class           @relation(fields: [classId], references: [id], onDelete: Cascade)
+  materials ClassMaterial[]
+}
+
+model ClassMaterial {
+  id           String      @id @default(uuid()) @db.Uuid
+  folderId     String      @db.Uuid
+  name         String
+  description  String?
+  url          String
+  publicId     String
+  resourceType String      // "image" | "document" | "video"
+  mimeType     String
+  sizeBytes    Int?
+  isPublished  Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  folder       ClassFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
 }
 
 model Enrollment {

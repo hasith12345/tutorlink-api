@@ -255,6 +255,95 @@ router.post("/cv", cvUpload.single("file"), async (req, res) => {
   }
 });
 
+// Multer config for class material uploads: images, PDF, DOC/DOCX, video (max 50 MB)
+const classMaterialUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+  fileFilter: (req, file, cb) => {
+    const allowed = [
+      "image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif",
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "video/mp4", "video/webm", "video/quicktime",
+    ];
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("File type not allowed. Accepted: images, PDF, DOC/DOCX, MP4/WEBM video"), false);
+    }
+  },
+});
+
+// ✅ Class material upload (authenticated tutor)
+router.post("/class-material", authMiddleware, classMaterialUpload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+
+    const { folderId, description } = req.body;
+    if (!folderId) {
+      return res.status(400).json({ message: "folderId is required" });
+    }
+
+    const userId = req.user.id;
+
+    // Verify the folder belongs to a class owned by this tutor
+    const folder = await prisma.classFolder.findUnique({
+      where: { id: folderId },
+      include: { class: true },
+    });
+    if (!folder) {
+      return res.status(404).json({ message: "Folder not found" });
+    }
+
+    const tutor = await prisma.tutor.findUnique({ where: { userId } });
+    if (!tutor || folder.class.tutorId !== tutor.id) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    const mimeType = req.file.mimetype;
+    let resourceType = "raw";
+    let materialResourceType = "document";
+
+    if (mimeType.startsWith("image/")) {
+      resourceType = "image";
+      materialResourceType = "image";
+    } else if (mimeType.startsWith("video/")) {
+      resourceType = "video";
+      materialResourceType = "video";
+    }
+
+    const result = await streamUploadToCloudinary(
+      req.file.buffer,
+      "tutorlink/class-materials",
+      { resource_type: resourceType }
+    );
+
+    const material = await prisma.classMaterial.create({
+      data: {
+        folderId,
+        name: req.file.originalname,
+        description: description || null,
+        url: result.secure_url,
+        publicId: result.public_id,
+        resourceType: materialResourceType,
+        mimeType,
+        sizeBytes: req.file.size,
+      },
+    });
+
+    res.status(201).json({ material });
+  } catch (error) {
+    console.error("Class material upload failed:", error);
+    if (error.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({ message: "File is too large. Maximum size is 50 MB." });
+    }
+    res.status(500).json({ message: "Upload failed", error: error.message });
+  }
+});
+
 // Helper: upload buffer to Cloudinary via stream
 function streamUploadToCloudinary(buffer, folder, options = {}) {
   return new Promise((resolve, reject) => {

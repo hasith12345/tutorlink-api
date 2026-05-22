@@ -193,6 +193,16 @@ exports.getMyClasses = async (req, res, next) => {
     const classes = await prisma.class.findMany({
       where: { tutorId: tutor.id },
       orderBy: { date: "asc" },
+      include: {
+        enrollments: {
+          where: { status: "ACTIVE" },
+          include: {
+            student: {
+              include: { user: { select: { fullName: true, email: true } } },
+            },
+          },
+        },
+      },
     });
 
     res.json({ classes });
@@ -219,7 +229,7 @@ exports.updateClass = async (req, res, next) => {
       return res.status(404).json({ message: "Class not found" });
     }
 
-    const { subject, description, venue, mode, location, date, time, duration, fees, maxStudents } = req.body;
+    const { subject, description, venue, mode, location, date, time, duration, fees, maxStudents, meetingLink } = req.body;
 
     const updatedClass = await prisma.class.update({
       where: { id: classId },
@@ -234,6 +244,7 @@ exports.updateClass = async (req, res, next) => {
         ...(duration && { duration }),
         ...(fees !== undefined && { fees: parseInt(fees) }),
         ...(maxStudents && { maxStudents: parseInt(maxStudents) }),
+        ...(meetingLink !== undefined && { meetingLink: meetingLink || null }),
       },
     });
 
