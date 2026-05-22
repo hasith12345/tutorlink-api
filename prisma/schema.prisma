@@ -49,6 +49,7 @@ model Student {
   updatedAt      DateTime     @updatedAt
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   enrollments    Enrollment[]
+  reviews        Review[]
 }
 
 // Tutor profile table
@@ -97,7 +98,8 @@ model Tutor {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  classes         Class[]  // Classes created by this tutor
+  classes         Class[]
+  reviews         Review[]
 }
 
 // Class table - Tutor-created classes/sessions
@@ -160,8 +162,23 @@ model Enrollment {
   student     Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
   class       Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
   payment     Payment?
+  review      Review?
 
   @@unique([studentId, classId])
+}
+
+model Review {
+  id           String    @id @default(uuid()) @db.Uuid
+  tutorId      String    @db.Uuid
+  studentId    String    @db.Uuid
+  enrollmentId String    @unique @db.Uuid
+  rating       Int                            // 1–5
+  comment      String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  tutor        Tutor     @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  student      Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
 }
 
 model Payment {
