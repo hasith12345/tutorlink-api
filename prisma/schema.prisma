@@ -29,14 +29,27 @@ model User {
   updatedAt              DateTime  @updatedAt
   student                Student?  // Optional - if exists, user has student role
   tutor                  Tutor?    // Optional - if exists, user has tutor role
+  notifications          Notification[]
+  sentMessages           Message[]
+}
+
+model Notification {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @db.Uuid  // null = admin notification
+  type      String
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // Student profile table
 // - Created when user signs up as Student OR adds Student role later
 // - userId is UNIQUE - a user can have only ONE student profile
 model Student {
-  id             String   @id @default(uuid()) @db.Uuid
-  userId         String   @unique @db.Uuid  // One-to-one with User
+  id             String       @id @default(uuid()) @db.Uuid
+  userId         String       @unique @db.Uuid  // One-to-one with User
   dob            String?
   phone          String?
   address        String?
@@ -44,10 +57,13 @@ model Student {
   schoolName     String?
   parentName     String?
   parentPhone    String?
-  avatar         String?  // Profile image URL (Cloudinary)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  avatar         String?      // Profile image URL (Cloudinary)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  enrollments    Enrollment[]
+  reviews        Review[]
+  conversations  Conversation[]
 }
 
 // Tutor profile table
@@ -96,7 +112,9 @@ model Tutor {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  classes         Class[]  // Classes created by this tutor
+  classes         Class[]
+  reviews         Review[]
+  conversations   Conversation[]
 }
 
 // Class table - Tutor-created classes/sessions
@@ -115,8 +133,103 @@ model Class {
   fees            Int      // in LKR (e.g., 2500)
   maxStudents     Int      @default(10)
   enrolledCount   Int      @default(0)
-  status          String   @default("ACTIVE") // ACTIVE | CANCELLED | COMPLETED
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  tutor           Tutor    @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  meetingLink     String?  // Zoom / Meet / Teams URL
+  status          String       @default("ACTIVE") // ACTIVE | CANCELLED | COMPLETED
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  tutor           Tutor        @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  enrollments     Enrollment[]
+  folders         ClassFolder[]
+}
+
+model ClassFolder {
+  id        String          @id @default(uuid()) @db.Uuid
+  classId   String          @db.Uuid
+  name      String
+  order     Int             @default(0)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  class     Class           @relation(fields: [classId], references: [id], onDelete: Cascade)
+  materials ClassMaterial[]
+}
+
+model ClassMaterial {
+  id           String      @id @default(uuid()) @db.Uuid
+  folderId     String      @db.Uuid
+  name         String
+  description  String?
+  url          String
+  publicId     String
+  resourceType String      // "image" | "document" | "video"
+  mimeType     String
+  sizeBytes    Int?
+  isPublished  Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  folder       ClassFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+}
+
+model Enrollment {
+  id          String    @id @default(uuid()) @db.Uuid
+  studentId   String    @db.Uuid
+  classId     String    @db.Uuid
+  status      String    @default("ACTIVE")   // ACTIVE | CANCELLED
+  enrolledAt  DateTime  @default(now())
+  student     Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  class       Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  payment     Payment?
+  review      Review?
+
+  @@unique([studentId, classId])
+}
+
+model Review {
+  id           String    @id @default(uuid()) @db.Uuid
+  tutorId      String    @db.Uuid
+  studentId    String    @db.Uuid
+  enrollmentId String    @unique @db.Uuid
+  rating       Int                            // 1–5
+  comment      String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  tutor        Tutor     @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  student      Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+}
+
+model Payment {
+  id               String      @id @default(uuid()) @db.Uuid
+  enrollmentId     String      @unique @db.Uuid
+  stripePaymentId  String      @unique
+  totalAmount      Int         // full class fees in LKR
+  tutorAmount      Int         // 92% of totalAmount
+  platformAmount   Int         // 8% of totalAmount
+  currency         String      @default("lkr")
+  status           String      @default("PENDING")  // PENDING | COMPLETED | FAILED
+  paidAt           DateTime?
+  createdAt        DateTime    @default(now())
+  enrollment       Enrollment  @relation(fields: [enrollmentId], references: [id])
+}
+
+model Conversation {
+  id        String    @id @default(uuid()) @db.Uuid
+  studentId String    @db.Uuid
+  tutorId   String    @db.Uuid
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  student   Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  tutor     Tutor     @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  messages  Message[]
+
+  @@unique([studentId, tutorId])
+}
+
+model Message {
+  id             String       @id @default(uuid()) @db.Uuid
+  conversationId String       @db.Uuid
+  senderId       String       @db.Uuid
+  content        String
+  read           Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
 }

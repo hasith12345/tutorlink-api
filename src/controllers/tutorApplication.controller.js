@@ -1,4 +1,5 @@
 const { prisma } = require("../models");
+const { createNotification } = require("../services/notification.service");
 
 // ✅ Submit tutor application (upload CV, qualifications, subjects, experience)
 exports.submitTutorApplication = async (req, res, next) => {
@@ -78,23 +79,8 @@ exports.getTutorApplicationStatus = async (req, res, next) => {
       return res.status(404).json({ message: "Tutor profile not found" });
     }
 
-    // If status is PENDING but no qualifications/subjects were provided, treat as NOT_SUBMITTED
-    // This handles accounts created before the conditional status logic was added
-    const hasDetails = tutor.qualifications && tutor.subjects && tutor.subjects.length > 0;
-    const effectiveStatus = (tutor.applicationStatus === "PENDING" && !hasDetails)
-      ? "NOT_SUBMITTED"
-      : tutor.applicationStatus;
-
-    // Correct the DB record so it's consistent going forward
-    if (effectiveStatus === "NOT_SUBMITTED" && tutor.applicationStatus === "PENDING") {
-      await prisma.tutor.update({
-        where: { userId },
-        data: { applicationStatus: "NOT_SUBMITTED" }
-      });
-    }
-
     res.json({
-      tutorStatus: effectiveStatus,
+      tutorStatus: tutor.applicationStatus,
       profile: tutor,
     });
   } catch (err) {
@@ -208,6 +194,16 @@ exports.getMyClasses = async (req, res, next) => {
     const classes = await prisma.class.findMany({
       where: { tutorId: tutor.id },
       orderBy: { date: "asc" },
+      include: {
+        enrollments: {
+          where: { status: "ACTIVE" },
+          include: {
+            student: {
+              include: { user: { select: { fullName: true, email: true } } },
+            },
+          },
+        },
+      },
     });
 
     res.json({ classes });
@@ -234,7 +230,7 @@ exports.updateClass = async (req, res, next) => {
       return res.status(404).json({ message: "Class not found" });
     }
 
-    const { subject, description, venue, mode, location, date, time, duration, fees, maxStudents } = req.body;
+    const { subject, description, venue, mode, location, date, time, duration, fees, maxStudents, meetingLink } = req.body;
 
     const updatedClass = await prisma.class.update({
       where: { id: classId },
@@ -249,6 +245,7 @@ exports.updateClass = async (req, res, next) => {
         ...(duration && { duration }),
         ...(fees !== undefined && { fees: parseInt(fees) }),
         ...(maxStudents && { maxStudents: parseInt(maxStudents) }),
+        ...(meetingLink !== undefined && { meetingLink: meetingLink || null }),
       },
     });
 
@@ -296,12 +293,36 @@ exports.deleteClass = async (req, res, next) => {
     const tutor = await prisma.tutor.findUnique({ where: { userId } });
     if (!tutor) return res.status(404).json({ message: "Tutor profile not found" });
 
-    const existingClass = await prisma.class.findUnique({ where: { id: classId } });
+    const existingClass = await prisma.class.findUnique({
+      where: { id: classId },
+      include: {
+        enrollments: { include: { payment: true } },
+      },
+    });
     if (!existingClass || existingClass.tutorId !== tutor.id) {
       return res.status(404).json({ message: "Class not found" });
     }
 
-    await prisma.class.delete({ where: { id: classId } });
+    // Block deletion if any student has paid for this class — financial records can't be wiped
+    const hasPaidEnrollments = existingClass.enrollments.some(
+      (e) => e.payment && e.payment.status === "COMPLETED"
+    );
+    if (hasPaidEnrollments) {
+      return res.status(400).json({
+        message:
+          "Cannot delete a class with paid enrollments. Cancel the class instead — it will remain in the system as a record.",
+      });
+    }
+
+    // No paid enrollments — safe to delete. Remove unpaid payments and enrollments first.
+    await prisma.$transaction(async (tx) => {
+      const enrollmentIds = existingClass.enrollments.map((e) => e.id);
+      if (enrollmentIds.length > 0) {
+        await tx.payment.deleteMany({ where: { enrollmentId: { in: enrollmentIds } } });
+      }
+      await tx.class.delete({ where: { id: classId } });
+    });
+
     res.json({ message: "Class deleted successfully" });
   } catch (err) {
     console.error("Delete class error:", err);
@@ -464,6 +485,160 @@ exports.rejectApplication = async (req, res, next) => {
     res.json({ message: "Tutor application rejected", tutor: rejected });
   } catch (err) {
     console.error("Reject application error:", err);
+    next(err);
+  }
+};
+
+// ========================
+// ADMIN — CLASSES MANAGEMENT
+// ========================
+
+// ✅ Get all classes (with tutor info + enrollment counts)
+exports.getAllClassesAdmin = async (req, res, next) => {
+  try {
+    const classes = await prisma.class.findMany({
+      orderBy: { createdAt: "desc" },
+      include: {
+        tutor: {
+          include: {
+            user: {
+              select: {
+                fullName: true,
+                email: true,
+                student: { select: { avatar: true } },
+              },
+            },
+          },
+        },
+        enrollments: {
+          include: { payment: true },
+        },
+      },
+    });
+
+    const payload = classes.map((c) => {
+      const paidCount = c.enrollments.filter((e) => e.payment?.status === "COMPLETED").length;
+      return {
+        id: c.id,
+        subject: c.subject,
+        description: c.description,
+        mode: c.mode,
+        venue: c.venue,
+        schedule: c.schedule,
+        time: c.time,
+        duration: c.duration,
+        fees: c.fees,
+        maxStudents: c.maxStudents,
+        enrolledCount: c.enrolledCount,
+        paidEnrollments: paidCount,
+        totalEnrollments: c.enrollments.length,
+        status: c.status,
+        createdAt: c.createdAt,
+        tutorId: c.tutorId,
+        tutorName: c.tutor.user.fullName,
+        tutorEmail: c.tutor.user.email,
+        tutorAvatar: c.tutor.avatar || c.tutor.user.student?.avatar || null,
+      };
+    });
+
+    res.json({ classes: payload });
+  } catch (err) {
+    console.error("Admin get classes error:", err);
+    next(err);
+  }
+};
+
+// ✅ Hold a class (admin) — temporarily pauses it
+exports.holdClassAdmin = async (req, res, next) => {
+  try {
+    const classId = req.params.id;
+    const existing = await prisma.class.findUnique({
+      where: { id: classId },
+      include: { tutor: { select: { userId: true } } },
+    });
+    if (!existing) return res.status(404).json({ message: "Class not found" });
+    if (existing.status === "CANCELLED") {
+      return res.status(400).json({ message: "Cannot hold a cancelled class" });
+    }
+    const updated = await prisma.class.update({
+      where: { id: classId },
+      data: { status: "ON_HOLD" },
+    });
+
+    // Notify the tutor
+    createNotification({
+      userId: existing.tutor.userId,
+      type: "CLASS_ON_HOLD",
+      title: "Your class has been placed on hold",
+      message: `An admin has put "${existing.subject}" on hold. Please contact the admin team for more details.`,
+    }).catch((e) => console.error("Notify tutor (hold) failed:", e));
+
+    res.json({ message: "Class put on hold", class: updated });
+  } catch (err) {
+    console.error("Hold class error:", err);
+    next(err);
+  }
+};
+
+// ✅ Unhold a class (admin) — resumes from hold
+exports.unholdClassAdmin = async (req, res, next) => {
+  try {
+    const classId = req.params.id;
+    const existing = await prisma.class.findUnique({
+      where: { id: classId },
+      include: { tutor: { select: { userId: true } } },
+    });
+    if (!existing) return res.status(404).json({ message: "Class not found" });
+    if (existing.status !== "ON_HOLD") {
+      return res.status(400).json({ message: "Class is not on hold" });
+    }
+    const updated = await prisma.class.update({
+      where: { id: classId },
+      data: { status: "ACTIVE" },
+    });
+
+    // Notify the tutor
+    createNotification({
+      userId: existing.tutor.userId,
+      type: "CLASS_RESUMED",
+      title: "Your class is active again",
+      message: `An admin has resumed "${existing.subject}". You can continue teaching as normal.`,
+    }).catch((e) => console.error("Notify tutor (unhold) failed:", e));
+
+    res.json({ message: "Class resumed", class: updated });
+  } catch (err) {
+    console.error("Unhold class error:", err);
+    next(err);
+  }
+};
+
+// ✅ Force-delete a class (admin) — wipes enrollments, payments, reviews, folders, conversations, messages
+exports.forceDeleteClassAdmin = async (req, res, next) => {
+  try {
+    const classId = req.params.id;
+    const existing = await prisma.class.findUnique({ where: { id: classId } });
+    if (!existing) return res.status(404).json({ message: "Class not found" });
+
+    await prisma.$transaction(async (tx) => {
+      // Fetch enrollment ids first (so we can delete payments + reviews)
+      const enrollments = await tx.enrollment.findMany({
+        where: { classId },
+        select: { id: true },
+      });
+      const enrollmentIds = enrollments.map((e) => e.id);
+
+      if (enrollmentIds.length > 0) {
+        // Payment doesn't cascade — delete manually
+        await tx.payment.deleteMany({ where: { enrollmentId: { in: enrollmentIds } } });
+      }
+
+      // Enrollments, folders, materials all cascade from Class deletion
+      await tx.class.delete({ where: { id: classId } });
+    });
+
+    res.json({ message: "Class force-deleted successfully" });
+  } catch (err) {
+    console.error("Force delete class error:", err);
     next(err);
   }
 };

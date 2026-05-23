@@ -5,6 +5,11 @@ const authRoutes = require("./routes/auth.routes");
 const tutorRoutes = require("./routes/tutor.routes");
 const uploadRoutes = require("./routes/uploadRoutes");
 const tutorApplicationRoutes = require("./routes/tutorApplication.routes");
+const paymentRoutes = require("./routes/payment.routes");
+const classFolderRoutes = require("./routes/classFolder.routes");
+const reviewRoutes = require("./routes/review.routes");
+const notificationRoutes = require("./routes/notification.routes");
+const messageRoutes = require("./routes/message.routes");
 const errorMiddleware = require("./middleware/error.middleware.js");
 
 const app = express();
@@ -30,6 +35,21 @@ app.use("/api/upload", uploadRoutes);
 
 // ✅ TUTOR APPLICATION & CLASS ROUTES
 app.use("/api/tutor", tutorApplicationRoutes);
+
+// ✅ CLASS FOLDER & MATERIAL ROUTES
+app.use("/api/tutor", classFolderRoutes);
+
+// ✅ PAYMENT ROUTES
+app.use("/api/payments", paymentRoutes);
+
+// ✅ REVIEW ROUTES
+app.use("/api/reviews", reviewRoutes);
+
+// ✅ NOTIFICATION ROUTES
+app.use("/api/notifications", notificationRoutes);
+
+// ✅ MESSAGE ROUTES
+app.use("/api/messages", messageRoutes);
 
 // ✅ ERROR HANDLER (LAST)
 app.use(errorMiddleware);

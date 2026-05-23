@@ -1,3 +1,6 @@
 node_modules
 
 /src/generated/prisma
+
+# Redis dump files (not used in this project)
+*.rdb
