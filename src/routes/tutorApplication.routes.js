@@ -16,6 +16,10 @@ const {
   getAllApplications,
   approveApplication,
   rejectApplication,
+  getAllClassesAdmin,
+  forceDeleteClassAdmin,
+  holdClassAdmin,
+  unholdClassAdmin,
 } = require("../controllers/tutorApplication.controller");
 
 // ✅ Tutor Application Routes (authenticated)
@@ -36,5 +40,11 @@ router.get("/admin/applications", authMiddleware, getAllApplications);
 router.get("/admin/applications/pending", authMiddleware, getPendingApplications);
 router.put("/admin/applications/:id/approve", authMiddleware, approveApplication);
 router.put("/admin/applications/:id/reject", authMiddleware, rejectApplication);
+
+// ✅ Admin Class Management Routes
+router.get("/admin/classes", authMiddleware, getAllClassesAdmin);
+router.delete("/admin/classes/:id", authMiddleware, forceDeleteClassAdmin);
+router.put("/admin/classes/:id/hold", authMiddleware, holdClassAdmin);
+router.put("/admin/classes/:id/unhold", authMiddleware, unholdClassAdmin);
 
 module.exports = router;
