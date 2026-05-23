@@ -310,7 +310,7 @@ exports.deleteClass = async (req, res, next) => {
     if (hasPaidEnrollments) {
       return res.status(400).json({
         message:
-          "Cannot delete a class with paid enrollments. Cancel the class instead — it will remain in the system as a record.",
+          "This class has paid enrollments and can't be deleted directly. If you really want to delete it, please contact an admin.",
       });
     }
 
