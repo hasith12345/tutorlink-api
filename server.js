@@ -5,6 +5,7 @@ const jwt = require("jsonwebtoken");
 const app = require("./src/app");
 const { prisma } = require("./src/models");
 const { setIO } = require("./src/config/socket");
+const { startTutorAvailabilityCron } = require("./src/jobs/tutorAvailabilityCron");
 
 const PORT = process.env.PORT || 5000;
 
@@ -49,6 +50,9 @@ const startServer = async () => {
     });
 
     setIO(io);
+
+    // Start scheduled jobs
+    startTutorAvailabilityCron();
 
     httpServer.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);

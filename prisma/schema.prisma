@@ -107,6 +107,7 @@ model Tutor {
   // Profile Status
   isVerified      Boolean  @default(false)
   isAvailable     Boolean  @default(true)
+  lastOnlineAt    DateTime? // Updated every time tutor visits /tutor/dashboard; used by daily cron to flip isAvailable
   avatar          String?  // Avatar URL
   
   createdAt       DateTime @default(now())

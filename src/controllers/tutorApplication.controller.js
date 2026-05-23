@@ -642,3 +642,28 @@ exports.forceDeleteClassAdmin = async (req, res, next) => {
     next(err);
   }
 };
+
+// ✅ POST /api/tutor/heartbeat — called by tutor dashboard on load to record activity
+// Used by the daily 2 AM cron job to flip isAvailable to false for inactive tutors
+exports.recordTutorHeartbeat = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const tutor = await prisma.tutor.findUnique({ where: { userId } });
+    if (!tutor) return res.status(404).json({ message: "Tutor profile not found" });
+
+    const updated = await prisma.tutor.update({
+      where: { id: tutor.id },
+      data: {
+        lastOnlineAt: new Date(),
+        // If a previously-inactive tutor returns, mark them active immediately
+        isAvailable: true,
+      },
+      select: { lastOnlineAt: true, isAvailable: true },
+    });
+
+    res.json({ ok: true, lastOnlineAt: updated.lastOnlineAt, isAvailable: updated.isAvailable });
+  } catch (err) {
+    console.error("Heartbeat error:", err);
+    next(err);
+  }
+};

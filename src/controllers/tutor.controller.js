@@ -8,34 +8,26 @@ exports.searchTutors = async (req, res) => {
     const { subject, location, learningMode, limit = 50 } = req.query;
 
     // Build search filters — only show APPROVED tutors who have at least one active class
+    // Combine status + mode into one classes.some filter so they stack correctly
+    const classFilter = { status: "ACTIVE" };
+    if (learningMode && ["online", "physical", "hybrid"].includes(learningMode)) {
+      classFilter.mode = learningMode;
+    }
+
     const filters = {
       isAvailable: true,
       applicationStatus: "APPROVED",
-      classes: { some: { status: "ACTIVE" } },
+      classes: { some: classFilter },
     };
 
-    // Search in subject or subjects array
+    // Search across tutor name, subject field, subjects[] array, and class subjects
     if (subject && subject.trim()) {
+      const q = subject.trim();
       filters.OR = [
-        {
-          subject: {
-            contains: subject,
-            mode: "insensitive",
-          },
-        },
-        {
-          subjects: {
-            hasSome: [subject],
-          },
-        },
-        {
-          user: {
-            fullName: {
-              contains: subject,
-              mode: "insensitive",
-            },
-          },
-        },
+        { subject: { contains: q, mode: "insensitive" } },
+        { subjects: { has: q } },
+        { user: { fullName: { contains: q, mode: "insensitive" } } },
+        { classes: { some: { ...classFilter, subject: { contains: q, mode: "insensitive" } } } },
       ];
     }
 
@@ -45,11 +37,6 @@ exports.searchTutors = async (req, res) => {
         contains: location,
         mode: "insensitive",
       };
-    }
-
-    // Filter by class mode (not tutor's learningMode)
-    if (learningMode && ["online", "physical", "hybrid"].includes(learningMode)) {
-      filters.classes = { some: { status: "ACTIVE", mode: learningMode } };
     }
 
     // Fetch tutors with user data
@@ -118,65 +105,94 @@ exports.searchTutors = async (req, res) => {
 exports.getTutorSuggestions = async (req, res) => {
   try {
     const { query, limit = 10 } = req.query;
+    const q = (query || "").trim();
+    const take = parseInt(limit);
 
-    if (!query || query.trim().length === 0) {
-      return res.status(200).json({
-        success: true,
-        suggestions: [],
-      });
+    // Only suggest from APPROVED + active tutors (matches search behavior)
+    const baseFilter = {
+      isAvailable: true,
+      applicationStatus: "APPROVED",
+      classes: { some: { status: "ACTIVE" } },
+    };
+
+    // 1. SUBJECT suggestions — distinct list from tutor.subject, tutor.subjects[], class.subject
+    //    Aggregate from the DB then dedupe/filter client-side by case-insensitive match
+    const [tutorRows, classRows] = await Promise.all([
+      prisma.tutor.findMany({
+        where: baseFilter,
+        select: { subject: true, subjects: true },
+      }),
+      prisma.class.findMany({
+        where: { status: "ACTIVE", tutor: baseFilter },
+        select: { subject: true },
+      }),
+    ]);
+
+    const subjectCounts = new Map(); // key = lowercase, val = { canonical, count }
+    const bumpSubject = (s) => {
+      if (!s || !s.trim()) return;
+      const key = s.trim().toLowerCase();
+      if (!subjectCounts.has(key)) subjectCounts.set(key, { canonical: s.trim(), count: 0 });
+      subjectCounts.get(key).count++;
+    };
+    tutorRows.forEach((t) => {
+      bumpSubject(t.subject);
+      (t.subjects || []).forEach(bumpSubject);
+    });
+    classRows.forEach((c) => bumpSubject(c.subject));
+
+    let subjectList = Array.from(subjectCounts.values());
+    if (q) {
+      const ql = q.toLowerCase();
+      subjectList = subjectList.filter((s) => s.canonical.toLowerCase().includes(ql));
     }
+    subjectList.sort((a, b) => b.count - a.count || a.canonical.localeCompare(b.canonical));
+    const subjectSuggestions = subjectList.slice(0, take).map((s) => ({
+      type: "subject",
+      value: s.canonical,
+      displayText: s.canonical,
+      count: s.count,
+    }));
 
-    // Search tutors by name or subject
-    const tutors = await prisma.tutor.findMany({
-      where: {
-        isAvailable: true,
-        OR: [
-          {
-            subject: {
-              contains: query,
-              mode: "insensitive",
+    // 2. TUTOR suggestions — only when there's a query (avoid dumping every tutor)
+    let tutorSuggestions = [];
+    if (q) {
+      const tutors = await prisma.tutor.findMany({
+        where: {
+          ...baseFilter,
+          OR: [
+            { user: { fullName: { contains: q, mode: "insensitive" } } },
+            { subject: { contains: q, mode: "insensitive" } },
+            { subjects: { has: q } },
+          ],
+        },
+        include: {
+          user: {
+            select: {
+              fullName: true,
+              student: { select: { avatar: true } },
             },
-          },
-          {
-            subjects: {
-              hasSome: [query],
-            },
-          },
-          {
-            user: {
-              fullName: {
-                contains: query,
-                mode: "insensitive",
-              },
-            },
-          },
-        ],
-      },
-      include: {
-        user: {
-          select: {
-            fullName: true,
           },
         },
-      },
-      take: parseInt(limit),
-      orderBy: {
-        rating: "desc",
-      },
-    });
-
-    // Format suggestions
-    const suggestions = tutors.map((tutor) => ({
-      id: tutor.id,
-      name: tutor.user.fullName,
-      subject: tutor.subject,
-      displayText: `${tutor.subject} - ${tutor.user.fullName}`,
-      avatar: tutor.avatar,
-    }));
+        take,
+        orderBy: { rating: "desc" },
+      });
+      tutorSuggestions = tutors.map((tutor) => ({
+        type: "tutor",
+        id: tutor.id,
+        name: tutor.user.fullName,
+        subject: tutor.subject,
+        displayText: tutor.subject ? `${tutor.user.fullName} — ${tutor.subject}` : tutor.user.fullName,
+        avatar: tutor.avatar || tutor.user.student?.avatar || null,
+      }));
+    }
 
     res.status(200).json({
       success: true,
-      suggestions,
+      subjects: subjectSuggestions,
+      tutors: tutorSuggestions,
+      // Backward-compatible flat list (existing frontend reads this)
+      suggestions: [...subjectSuggestions, ...tutorSuggestions],
     });
   } catch (error) {
     console.error("Get suggestions error:", error);
@@ -212,6 +228,11 @@ exports.getTutorById = async (req, res) => {
         },
       },
     });
+
+    // Hide tutors that are inactive (haven't visited dashboard in 30+ days) — treat as not found
+    if (tutor && tutor.isAvailable === false) {
+      return res.status(404).json({ success: false, message: "Tutor not found" });
+    }
 
     if (!tutor) {
       return res.status(404).json({

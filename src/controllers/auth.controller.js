@@ -256,6 +256,20 @@ exports.login = async (req, res, next) => {
     const hasStudentProfile = !!user.student;  // true if student profile exists
     const hasTutorProfile = !!user.tutor;      // true if tutor profile exists
 
+    // ✅ Block login for tutors marked inactive by the daily availability sweep
+    // Only blocks if the user is exclusively a tutor — student-only or dual-role accounts are unaffected
+    if (
+      hasTutorProfile &&
+      !hasStudentProfile &&
+      user.tutor.applicationStatus === "APPROVED" &&
+      user.tutor.isAvailable === false
+    ) {
+      return res.status(403).json({
+        message: "Your tutor account is inactive due to prolonged absence. Please contact an admin to reactivate it.",
+        accountInactive: true,
+      });
+    }
+
     // Generate JWT token
     const token = generateToken(user);
     
@@ -1281,7 +1295,7 @@ exports.getAllUsers = async (req, res, next) => {
     const users = await prisma.user.findMany({
       include: {
         student: { select: { id: true, avatar: true, phone: true, schoolGrade: true, schoolName: true } },
-        tutor: { select: { id: true, avatar: true, phone: true, applicationStatus: true } }
+        tutor: { select: { id: true, avatar: true, phone: true, applicationStatus: true, isAvailable: true, lastOnlineAt: true } }
       },
       orderBy: { createdAt: "desc" }
     });
@@ -1296,6 +1310,8 @@ exports.getAllUsers = async (req, res, next) => {
       hasStudentProfile: !!u.student,
       hasTutorProfile: !!u.tutor,
       tutorStatus: u.tutor?.applicationStatus || null,
+      tutorIsAvailable: u.tutor?.isAvailable ?? null,
+      tutorLastOnlineAt: u.tutor?.lastOnlineAt ?? null,
       avatar: u.student?.avatar || u.tutor?.avatar || null,
       student: u.student,
       tutor: u.tutor,
@@ -1336,6 +1352,25 @@ exports.unbanUser = async (req, res, next) => {
     res.json({ message: "User unbanned successfully", user });
   } catch (err) {
     console.error("Unban user error:", err);
+    next(err);
+  }
+};
+
+// ✅ Admin: Reactivate an inactive tutor (flips isAvailable back to true + resets lastOnlineAt)
+exports.reactivateTutor = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const tutor = await prisma.tutor.findUnique({ where: { userId } });
+    if (!tutor) return res.status(404).json({ message: "Tutor profile not found" });
+
+    const updated = await prisma.tutor.update({
+      where: { id: tutor.id },
+      data: { isAvailable: true, lastOnlineAt: new Date() },
+      select: { id: true, isAvailable: true, lastOnlineAt: true },
+    });
+    res.json({ message: "Tutor reactivated successfully", tutor: updated });
+  } catch (err) {
+    console.error("Reactivate tutor error:", err);
     next(err);
   }
 };
