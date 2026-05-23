@@ -71,11 +71,31 @@ exports.getFolders = async (req, res, next) => {
       if (!student) {
         return res.status(403).json({ message: "Not authorized" });
       }
+      const now = new Date();
       const enrollment = await prisma.enrollment.findFirst({
-        where: { classId, studentId: student.id, status: "ACTIVE" },
+        where: {
+          classId,
+          studentId: student.id,
+          OR: [
+            { status: "ACTIVE" },
+            { status: "UNENROLLED", accessUntil: { gt: now } },
+          ],
+        },
+        include: { payment: true },
       });
       if (!enrollment) {
-        return res.status(403).json({ message: "Not enrolled in this class" });
+        return res.status(403).json({ message: "Not enrolled in this class or access has expired" });
+      }
+
+      // Block access when monthly payment is overdue past the 15-day grace period
+      if (enrollment.status === "ACTIVE" && enrollment.payment?.paidAt) {
+        const paidAt = new Date(enrollment.payment.paidAt);
+        const enrolledAt = new Date(enrollment.enrolledAt);
+        const periodStart = paidAt < enrolledAt ? paidAt : enrolledAt;
+        const accessExpiresAt = new Date(periodStart.getFullYear(), periodStart.getMonth() + 1, 15, 23, 59, 59);
+        if (now > accessExpiresAt) {
+          return res.status(403).json({ message: "Monthly payment is overdue. Renew payment to regain access." });
+        }
       }
     }
 
