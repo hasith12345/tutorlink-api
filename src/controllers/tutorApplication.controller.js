@@ -292,12 +292,36 @@ exports.deleteClass = async (req, res, next) => {
     const tutor = await prisma.tutor.findUnique({ where: { userId } });
     if (!tutor) return res.status(404).json({ message: "Tutor profile not found" });
 
-    const existingClass = await prisma.class.findUnique({ where: { id: classId } });
+    const existingClass = await prisma.class.findUnique({
+      where: { id: classId },
+      include: {
+        enrollments: { include: { payment: true } },
+      },
+    });
     if (!existingClass || existingClass.tutorId !== tutor.id) {
       return res.status(404).json({ message: "Class not found" });
     }
 
-    await prisma.class.delete({ where: { id: classId } });
+    // Block deletion if any student has paid for this class — financial records can't be wiped
+    const hasPaidEnrollments = existingClass.enrollments.some(
+      (e) => e.payment && e.payment.status === "COMPLETED"
+    );
+    if (hasPaidEnrollments) {
+      return res.status(400).json({
+        message:
+          "Cannot delete a class with paid enrollments. Cancel the class instead — it will remain in the system as a record.",
+      });
+    }
+
+    // No paid enrollments — safe to delete. Remove unpaid payments and enrollments first.
+    await prisma.$transaction(async (tx) => {
+      const enrollmentIds = existingClass.enrollments.map((e) => e.id);
+      if (enrollmentIds.length > 0) {
+        await tx.payment.deleteMany({ where: { enrollmentId: { in: enrollmentIds } } });
+      }
+      await tx.class.delete({ where: { id: classId } });
+    });
+
     res.json({ message: "Class deleted successfully" });
   } catch (err) {
     console.error("Delete class error:", err);

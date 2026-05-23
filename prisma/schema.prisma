@@ -30,6 +30,7 @@ model User {
   student                Student?  // Optional - if exists, user has student role
   tutor                  Tutor?    // Optional - if exists, user has tutor role
   notifications          Notification[]
+  sentMessages           Message[]
 }
 
 model Notification {
@@ -62,6 +63,7 @@ model Student {
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   enrollments    Enrollment[]
   reviews        Review[]
+  conversations  Conversation[]
 }
 
 // Tutor profile table
@@ -112,6 +114,7 @@ model Tutor {
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   classes         Class[]
   reviews         Review[]
+  conversations   Conversation[]
 }
 
 // Class table - Tutor-created classes/sessions
@@ -205,4 +208,28 @@ model Payment {
   paidAt           DateTime?
   createdAt        DateTime    @default(now())
   enrollment       Enrollment  @relation(fields: [enrollmentId], references: [id])
+}
+
+model Conversation {
+  id        String    @id @default(uuid()) @db.Uuid
+  studentId String    @db.Uuid
+  tutorId   String    @db.Uuid
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  student   Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  tutor     Tutor     @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  messages  Message[]
+
+  @@unique([studentId, tutorId])
+}
+
+model Message {
+  id             String       @id @default(uuid()) @db.Uuid
+  conversationId String       @db.Uuid
+  senderId       String       @db.Uuid
+  content        String
+  read           Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
 }

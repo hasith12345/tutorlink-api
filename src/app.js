@@ -9,6 +9,7 @@ const paymentRoutes = require("./routes/payment.routes");
 const classFolderRoutes = require("./routes/classFolder.routes");
 const reviewRoutes = require("./routes/review.routes");
 const notificationRoutes = require("./routes/notification.routes");
+const messageRoutes = require("./routes/message.routes");
 const errorMiddleware = require("./middleware/error.middleware.js");
 
 const app = express();
@@ -46,6 +47,9 @@ app.use("/api/reviews", reviewRoutes);
 
 // ✅ NOTIFICATION ROUTES
 app.use("/api/notifications", notificationRoutes);
+
+// ✅ MESSAGE ROUTES
+app.use("/api/messages", messageRoutes);
 
 // ✅ ERROR HANDLER (LAST)
 app.use(errorMiddleware);
