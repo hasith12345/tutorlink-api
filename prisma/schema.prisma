@@ -29,6 +29,18 @@ model User {
   updatedAt              DateTime  @updatedAt
   student                Student?  // Optional - if exists, user has student role
   tutor                  Tutor?    // Optional - if exists, user has tutor role
+  notifications          Notification[]
+}
+
+model Notification {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @db.Uuid  // null = admin notification
+  type      String
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // Student profile table

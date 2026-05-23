@@ -1,5 +1,6 @@
 const Stripe = require("stripe");
 const { prisma } = require("../models");
+const { createNotification } = require("../services/notification.service");
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -117,6 +118,52 @@ exports.confirmPayment = async (req, res) => {
         data: { totalStudents: { increment: 1 } },
       }),
     ]);
+
+    console.log(`[PAYMENT] Enrollment success — studentUserId=${req.user.id} tutorUserId=${cls.tutor.userId} class=${cls.subject}`)
+
+    // Fetch student name for tutor/admin notifications
+    const studentUser = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { fullName: true },
+    });
+    const studentName = studentUser?.fullName || "A student";
+
+    // Fire notifications — wrapped individually so one failure doesn't block others
+    try {
+      // 1. Notify student — successfully enrolled
+      await createNotification({
+        userId: req.user.id,
+        type: "ENROLLMENT_CONFIRMED",
+        title: "Enrollment Confirmed",
+        message: `You have successfully enrolled in ${cls.subject}. Payment of Rs.${cls.fees.toLocaleString()} received.`,
+      });
+    } catch (e) {
+      console.error('[PAYMENT] Student notification failed:', e.message)
+    }
+
+    try {
+      // 2. Notify tutor — payment received
+      await createNotification({
+        userId: cls.tutor.userId,
+        type: "PAYMENT_RECEIVED",
+        title: "Payment Received",
+        message: `${studentName} enrolled in your ${cls.subject} class. Rs.${tutorAmount.toLocaleString()} credited to your earnings.`,
+      });
+    } catch (e) {
+      console.error('[PAYMENT] Tutor notification failed:', e.message)
+    }
+
+    try {
+      // 3. Notify admin — payment received (userId = null for admin)
+      await createNotification({
+        userId: null,
+        type: "ADMIN_PAYMENT_RECEIVED",
+        title: "Payment Received",
+        message: `${studentName} enrolled in ${cls.subject}. Rs.${cls.fees.toLocaleString()} processed (platform fee: Rs.${platformAmount.toLocaleString()}).`,
+      });
+    } catch (e) {
+      console.error('[PAYMENT] Admin notification failed:', e.message)
+    }
 
     return res.json({
       enrollmentId: enrollment.id,
