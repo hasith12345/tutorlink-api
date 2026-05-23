@@ -500,7 +500,15 @@ exports.getAllClassesAdmin = async (req, res, next) => {
       orderBy: { createdAt: "desc" },
       include: {
         tutor: {
-          include: { user: { select: { fullName: true, email: true } } },
+          include: {
+            user: {
+              select: {
+                fullName: true,
+                email: true,
+                student: { select: { avatar: true } },
+              },
+            },
+          },
         },
         enrollments: {
           include: { payment: true },
@@ -529,7 +537,7 @@ exports.getAllClassesAdmin = async (req, res, next) => {
         tutorId: c.tutorId,
         tutorName: c.tutor.user.fullName,
         tutorEmail: c.tutor.user.email,
-        tutorAvatar: c.tutor.avatar,
+        tutorAvatar: c.tutor.avatar || c.tutor.user.student?.avatar || null,
       };
     });
 

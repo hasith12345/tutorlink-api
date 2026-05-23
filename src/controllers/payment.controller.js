@@ -250,7 +250,15 @@ exports.getStudentEnrollments = async (req, res) => {
         class: {
           include: {
             tutor: {
-              include: { user: { select: { fullName: true, email: true } } },
+              include: {
+                user: {
+                  select: {
+                    fullName: true,
+                    email: true,
+                    student: { select: { avatar: true } },
+                  },
+                },
+              },
             },
           },
         },
@@ -276,7 +284,7 @@ exports.getStudentEnrollments = async (req, res) => {
           meetingLink: e.class.meetingLink,
           tutorId: e.class.tutorId,
           tutorName: e.class.tutor.user.fullName,
-          tutorAvatar: e.class.tutor.avatar,
+          tutorAvatar: e.class.tutor.avatar || e.class.tutor.user.student?.avatar || null,
         },
         payment: e.payment
           ? { totalAmount: e.payment.totalAmount, status: e.payment.status, paidAt: e.payment.paidAt }
