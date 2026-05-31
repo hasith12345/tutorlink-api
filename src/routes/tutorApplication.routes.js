@@ -20,12 +20,16 @@ const {
   forceDeleteClassAdmin,
   holdClassAdmin,
   unholdClassAdmin,
+  recordTutorHeartbeat,
 } = require("../controllers/tutorApplication.controller");
 
 // ✅ Tutor Application Routes (authenticated)
 router.post("/application/submit", authMiddleware, submitTutorApplication);
 router.get("/application/status", authMiddleware, getTutorApplicationStatus);
 router.post("/application/upload-cv", authMiddleware, upload.single("cv"), uploadCV);
+
+// ✅ Tutor Heartbeat (records last-online timestamp for the daily availability cron)
+router.post("/heartbeat", authMiddleware, recordTutorHeartbeat);
 
 // ✅ Class Management Routes (authenticated tutor)
 router.post("/classes", authMiddleware, createClass);

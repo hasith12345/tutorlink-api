@@ -310,7 +310,7 @@ exports.deleteClass = async (req, res, next) => {
     if (hasPaidEnrollments) {
       return res.status(400).json({
         message:
-          "Cannot delete a class with paid enrollments. Cancel the class instead — it will remain in the system as a record.",
+          "This class has paid enrollments and can't be deleted directly. If you really want to delete it, please contact an admin.",
       });
     }
 
@@ -639,6 +639,31 @@ exports.forceDeleteClassAdmin = async (req, res, next) => {
     res.json({ message: "Class force-deleted successfully" });
   } catch (err) {
     console.error("Force delete class error:", err);
+    next(err);
+  }
+};
+
+// ✅ POST /api/tutor/heartbeat — called by tutor dashboard on load to record activity
+// Used by the daily 2 AM cron job to flip isAvailable to false for inactive tutors
+exports.recordTutorHeartbeat = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const tutor = await prisma.tutor.findUnique({ where: { userId } });
+    if (!tutor) return res.status(404).json({ message: "Tutor profile not found" });
+
+    const updated = await prisma.tutor.update({
+      where: { id: tutor.id },
+      data: {
+        lastOnlineAt: new Date(),
+        // If a previously-inactive tutor returns, mark them active immediately
+        isAvailable: true,
+      },
+      select: { lastOnlineAt: true, isAvailable: true },
+    });
+
+    res.json({ ok: true, lastOnlineAt: updated.lastOnlineAt, isAvailable: updated.isAvailable });
+  } catch (err) {
+    console.error("Heartbeat error:", err);
     next(err);
   }
 };

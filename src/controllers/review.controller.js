@@ -86,6 +86,43 @@ exports.getTutorReviews = async (req, res) => {
         student: {
           include: { user: { select: { fullName: true } } },
         },
+        enrollment: {
+          include: { class: { select: { id: true, subject: true } } },
+        },
+      },
+    });
+
+    const formatted = reviews.map((r) => ({
+      id: r.id,
+      rating: r.rating,
+      comment: r.comment,
+      createdAt: r.createdAt,
+      enrollmentId: r.enrollmentId,
+      classId: r.enrollment.class.id,
+      classSubject: r.enrollment.class.subject,
+      studentName: r.student.user.fullName,
+      studentAvatar: r.student.avatar || null,
+    }));
+
+    res.json({ reviews: formatted });
+  } catch (err) {
+    console.error("getTutorReviews error:", err);
+    res.status(500).json({ message: "Failed to fetch reviews" });
+  }
+};
+
+// GET /api/reviews/class/:classId  — reviews for a specific class
+exports.getClassReviews = async (req, res) => {
+  try {
+    const { classId } = req.params;
+
+    const reviews = await prisma.review.findMany({
+      where: { enrollment: { classId } },
+      orderBy: { createdAt: "desc" },
+      include: {
+        student: {
+          include: { user: { select: { fullName: true } } },
+        },
       },
     });
 
@@ -99,10 +136,18 @@ exports.getTutorReviews = async (req, res) => {
       studentAvatar: r.student.avatar || null,
     }));
 
-    res.json({ reviews: formatted });
+    const avgRating = reviews.length > 0
+      ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
+      : 0;
+
+    res.json({
+      reviews: formatted,
+      count: reviews.length,
+      averageRating: Math.round(avgRating * 10) / 10,
+    });
   } catch (err) {
-    console.error("getTutorReviews error:", err);
-    res.status(500).json({ message: "Failed to fetch reviews" });
+    console.error("getClassReviews error:", err);
+    res.status(500).json({ message: "Failed to fetch class reviews" });
   }
 };
 

@@ -18,6 +18,7 @@ const {
   getAllUsers,
   banUser,
   unbanUser,
+  reactivateTutor,
   adminLogin
 } = require("../controllers/auth.controller");
 const authMiddleware = require("../middleware/auth.middleware");
@@ -62,5 +63,6 @@ router.post("/admin/login", adminLogin);
 router.get("/admin/users", authMiddleware, getAllUsers);
 router.put("/admin/users/:userId/ban", authMiddleware, banUser);
 router.put("/admin/users/:userId/unban", authMiddleware, unbanUser);
+router.put("/admin/users/:userId/reactivate-tutor", authMiddleware, reactivateTutor);
 
 module.exports = router;

@@ -21,13 +21,28 @@ exports.createPaymentIntent = async (req, res) => {
     });
     if (!cls) return res.status(404).json({ message: "Class not found" });
     if (cls.status !== "ACTIVE") return res.status(400).json({ message: "Class is not active" });
-    if (cls.enrolledCount >= cls.maxStudents) return res.status(400).json({ message: "Class is full" });
 
-    // Check for duplicate enrollment
+    // If the student is already enrolled, allow paying only when the period has ended (renewal).
+    // Otherwise refuse so they don't double-pay an already-active period.
     const existing = await prisma.enrollment.findUnique({
       where: { studentId_classId: { studentId: student.id, classId } },
+      include: { payment: true },
     });
-    if (existing) return res.status(400).json({ message: "Already enrolled in this class" });
+    if (existing) {
+      if (existing.status !== "ACTIVE") {
+        return res.status(400).json({ message: "Enrollment is not active. Please re-enroll instead." });
+      }
+      const paidAt = existing.payment?.paidAt ? new Date(existing.payment.paidAt) : new Date(existing.enrolledAt);
+      const enrolledAt = new Date(existing.enrolledAt);
+      const periodStart = paidAt < enrolledAt ? paidAt : enrolledAt;
+      const nextPaymentDue = new Date(periodStart.getFullYear(), periodStart.getMonth() + 1, 1);
+      if (new Date() < nextPaymentDue) {
+        return res.status(400).json({ message: "Your current month is already paid. Try again after the period ends." });
+      }
+      // Overdue → renewal is allowed; the seat check below should be skipped
+    } else {
+      if (cls.enrolledCount >= cls.maxStudents) return res.status(400).json({ message: "Class is full" });
+    }
 
     // Create Stripe PaymentIntent (amount in smallest currency unit — LKR has no subunit, multiply by 100 per Stripe requirement)
     const paymentIntent = await stripe.paymentIntents.create({
@@ -79,45 +94,70 @@ exports.confirmPayment = async (req, res) => {
     });
     if (!cls) return res.status(404).json({ message: "Class not found" });
 
-    // Prevent duplicate
     const existing = await prisma.enrollment.findUnique({
       where: { studentId_classId: { studentId: student.id, classId } },
+      include: { payment: true },
     });
-    if (existing) return res.status(400).json({ message: "Already enrolled" });
 
     const tutorAmount = Math.round(cls.fees * 0.92);
     const platformAmount = cls.fees - tutorAmount;
 
-    // Create enrollment + payment + update counters atomically
-    const [enrollment] = await prisma.$transaction([
-      prisma.enrollment.create({
+    let enrollment;
+    let isRenewal = false;
+
+    if (existing) {
+      // Renewal — update the existing payment record and reset payment-due tracking
+      isRenewal = true;
+      enrollment = await prisma.enrollment.update({
+        where: { id: existing.id },
         data: {
-          studentId: student.id,
-          classId,
-          status: "ACTIVE",
+          lastPaymentDueNotifiedAt: null,
           payment: {
-            create: {
+            update: {
               stripePaymentId: paymentIntentId,
               totalAmount: cls.fees,
               tutorAmount,
               platformAmount,
-              currency: "lkr",
               status: "COMPLETED",
               paidAt: new Date(),
             },
           },
         },
         include: { payment: true },
-      }),
-      prisma.class.update({
-        where: { id: classId },
-        data: { enrolledCount: { increment: 1 } },
-      }),
-      prisma.tutor.update({
-        where: { id: cls.tutorId },
-        data: { totalStudents: { increment: 1 } },
-      }),
-    ]);
+      });
+    } else {
+      // New enrollment + payment + counter bumps
+      const [created] = await prisma.$transaction([
+        prisma.enrollment.create({
+          data: {
+            studentId: student.id,
+            classId,
+            status: "ACTIVE",
+            payment: {
+              create: {
+                stripePaymentId: paymentIntentId,
+                totalAmount: cls.fees,
+                tutorAmount,
+                platformAmount,
+                currency: "lkr",
+                status: "COMPLETED",
+                paidAt: new Date(),
+              },
+            },
+          },
+          include: { payment: true },
+        }),
+        prisma.class.update({
+          where: { id: classId },
+          data: { enrolledCount: { increment: 1 } },
+        }),
+        prisma.tutor.update({
+          where: { id: cls.tutorId },
+          data: { totalStudents: { increment: 1 } },
+        }),
+      ]);
+      enrollment = created;
+    }
 
     console.log(`[PAYMENT] Enrollment success — studentUserId=${req.user.id} tutorUserId=${cls.tutor.userId} class=${cls.subject}`)
 
@@ -130,12 +170,14 @@ exports.confirmPayment = async (req, res) => {
 
     // Fire notifications — wrapped individually so one failure doesn't block others
     try {
-      // 1. Notify student — successfully enrolled
+      // 1. Notify student — successfully enrolled / renewed
       await createNotification({
         userId: req.user.id,
-        type: "ENROLLMENT_CONFIRMED",
-        title: "Enrollment Confirmed",
-        message: `You have successfully enrolled in ${cls.subject}. Payment of Rs.${cls.fees.toLocaleString()} received.`,
+        type: isRenewal ? "PAYMENT_RENEWED" : "ENROLLMENT_CONFIRMED",
+        title: isRenewal ? "Payment Renewed" : "Enrollment Confirmed",
+        message: isRenewal
+          ? `Your monthly payment for ${cls.subject} has been renewed. Access restored.`
+          : `You have successfully enrolled in ${cls.subject}. Your learning journey starts now!`,
       });
     } catch (e) {
       console.error('[PAYMENT] Student notification failed:', e.message)
@@ -147,7 +189,9 @@ exports.confirmPayment = async (req, res) => {
         userId: cls.tutor.userId,
         type: "PAYMENT_RECEIVED",
         title: "Payment Received",
-        message: `${studentName} enrolled in your ${cls.subject} class. Rs.${tutorAmount.toLocaleString()} credited to your earnings.`,
+        message: isRenewal
+          ? `${studentName} renewed payment for your ${cls.subject} class. Rs.${tutorAmount.toLocaleString()} credited to your earnings.`
+          : `${studentName} enrolled in your ${cls.subject} class. Rs.${tutorAmount.toLocaleString()} credited to your earnings.`,
       });
     } catch (e) {
       console.error('[PAYMENT] Tutor notification failed:', e.message)
@@ -159,7 +203,9 @@ exports.confirmPayment = async (req, res) => {
         userId: null,
         type: "ADMIN_PAYMENT_RECEIVED",
         title: "Payment Received",
-        message: `${studentName} enrolled in ${cls.subject}. Rs.${cls.fees.toLocaleString()} processed (platform fee: Rs.${platformAmount.toLocaleString()}).`,
+        message: isRenewal
+          ? `${studentName} renewed payment for ${cls.subject}. Rs.${cls.fees.toLocaleString()} processed (platform fee: Rs.${platformAmount.toLocaleString()}).`
+          : `${studentName} enrolled in ${cls.subject}. Rs.${cls.fees.toLocaleString()} processed (platform fee: Rs.${platformAmount.toLocaleString()}).`,
       });
     } catch (e) {
       console.error('[PAYMENT] Admin notification failed:', e.message)
@@ -243,8 +289,15 @@ exports.getStudentEnrollments = async (req, res) => {
     const student = await prisma.student.findFirst({ where: { userId: req.user.id } });
     if (!student) return res.status(403).json({ message: "Student profile required" });
 
+    const now = new Date();
     const enrollments = await prisma.enrollment.findMany({
-      where: { studentId: student.id, status: "ACTIVE" },
+      where: {
+        studentId: student.id,
+        OR: [
+          { status: "ACTIVE" },
+          { status: "UNENROLLED", accessUntil: { gt: now } },
+        ],
+      },
       orderBy: { enrolledAt: "desc" },
       include: {
         class: {
@@ -266,11 +319,74 @@ exports.getStudentEnrollments = async (req, res) => {
       },
     });
 
+    // Compute payment-due status and notify once per overdue period
+    const studentUser = await prisma.user.findUnique({ where: { id: req.user.id }, select: { id: true } });
+
+    const enrollmentsWithDueInfo = await Promise.all(
+      enrollments.map(async (e) => {
+        let isPaymentDue = false;
+        let accessBlocked = false;
+        let nextPaymentDue = null;
+        let accessExpiresAt = null;
+
+        if (e.status === "ACTIVE" && e.payment?.paidAt) {
+          // Period = calendar month of payment. Take the earlier of paidAt / enrolledAt
+          // so backdating either field triggers correctly for testing.
+          const paidAt = new Date(e.payment.paidAt);
+          const enrolledAt = new Date(e.enrolledAt);
+          const periodStart = paidAt < enrolledAt ? paidAt : enrolledAt;
+
+          // First day of the month AFTER the paid period — that's when the next payment is due.
+          nextPaymentDue = new Date(periodStart.getFullYear(), periodStart.getMonth() + 1, 1);
+
+          // 15-day grace period from `nextPaymentDue` (so 15th of the next month, end-of-day).
+          accessExpiresAt = new Date(periodStart.getFullYear(), periodStart.getMonth() + 1, 15, 23, 59, 59);
+
+          if (now >= nextPaymentDue) {
+            isPaymentDue = true;
+            accessBlocked = now > accessExpiresAt;
+
+            if (studentUser) {
+              // Atomic claim — only ONE parallel request will get count > 0 and send the notification.
+              // The condition matches rows that haven't been notified for THIS period yet.
+              const claim = await prisma.enrollment.updateMany({
+                where: {
+                  id: e.id,
+                  OR: [
+                    { lastPaymentDueNotifiedAt: null },
+                    { lastPaymentDueNotifiedAt: { lt: nextPaymentDue } },
+                  ],
+                },
+                data: { lastPaymentDueNotifiedAt: now },
+              }).catch(() => ({ count: 0 }));
+
+              if (claim.count > 0) {
+                createNotification({
+                  userId: studentUser.id,
+                  type: "PAYMENT_DUE",
+                  title: "Payment due",
+                  message: `Your monthly payment for "${e.class.subject}" is due. You have until ${accessExpiresAt.toDateString()} to renew before access is blocked.`,
+                }).catch(() => {});
+              }
+            }
+          }
+        }
+
+        return { ...e, isPaymentDue, accessBlocked, nextPaymentDue, accessExpiresAt };
+      })
+    );
+
     return res.json({
-      enrollments: enrollments.map((e) => ({
+      enrollments: enrollmentsWithDueInfo.map((e) => ({
         enrollmentId: e.id,
         enrolledAt: e.enrolledAt,
         status: e.status,
+        unenrolledAt: e.unenrolledAt,
+        accessUntil: e.accessUntil,
+        isPaymentDue: e.isPaymentDue,
+        accessBlocked: e.accessBlocked,
+        nextPaymentDue: e.nextPaymentDue,
+        accessExpiresAt: e.accessExpiresAt,
         class: {
           id: e.class.id,
           subject: e.class.subject,
@@ -407,5 +523,71 @@ exports.getTutorStudents = async (req, res) => {
   } catch (err) {
     console.error("getTutorStudents error:", err);
     return res.status(500).json({ message: "Failed to fetch students" });
+  }
+};
+
+// POST /api/payments/student/enrollments/:id/unenroll
+// Student opts out — keeps access until the monthly period ends
+exports.unenrollFromClass = async (req, res) => {
+  try {
+    const enrollmentId = req.params.id;
+    const student = await prisma.student.findFirst({ where: { userId: req.user.id } });
+    if (!student) return res.status(403).json({ message: "Student profile required" });
+
+    const enrollment = await prisma.enrollment.findUnique({
+      where: { id: enrollmentId },
+      include: {
+        payment: true,
+        class: { include: { tutor: { select: { userId: true } } } },
+      },
+    });
+
+    if (!enrollment) return res.status(404).json({ message: "Enrollment not found" });
+    if (enrollment.studentId !== student.id) return res.status(403).json({ message: "Access denied" });
+    if (enrollment.status !== "ACTIVE") {
+      return res.status(400).json({ message: "Enrollment is not active" });
+    }
+
+    // Access ends 30 days after the last payment (the monthly period they paid for).
+    // Fall back to 30 days from enrolledAt if no payment date is available.
+    const baseDate = enrollment.payment?.paidAt || enrollment.enrolledAt;
+    const accessUntil = new Date(baseDate);
+    accessUntil.setDate(accessUntil.getDate() + 30);
+
+    const [updated] = await prisma.$transaction([
+      prisma.enrollment.update({
+        where: { id: enrollmentId },
+        data: { status: "UNENROLLED", unenrolledAt: new Date(), accessUntil },
+      }),
+      prisma.class.update({
+        where: { id: enrollment.classId },
+        data: { enrolledCount: { decrement: 1 } },
+      }),
+      prisma.tutor.update({
+        where: { id: enrollment.class.tutorId },
+        data: { totalStudents: { decrement: 1 } },
+      }),
+    ]);
+
+    // Notify the tutor
+    createNotification({
+      userId: enrollment.class.tutor.userId,
+      type: "STUDENT_UNENROLLED",
+      title: "A student has unenrolled",
+      message: `A student opted out of "${enrollment.class.subject}". They will retain access until ${accessUntil.toDateString()}.`,
+    }).catch(() => {});
+
+    return res.json({
+      message: "Unenrolled successfully. Access remains until the end of your paid period.",
+      enrollment: {
+        id: updated.id,
+        status: updated.status,
+        unenrolledAt: updated.unenrolledAt,
+        accessUntil: updated.accessUntil,
+      },
+    });
+  } catch (err) {
+    console.error("unenrollFromClass error:", err);
+    return res.status(500).json({ message: "Failed to unenroll" });
   }
 };

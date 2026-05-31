@@ -107,6 +107,7 @@ model Tutor {
   // Profile Status
   isVerified      Boolean  @default(false)
   isAvailable     Boolean  @default(true)
+  lastOnlineAt    DateTime? // Updated every time tutor visits /tutor/dashboard; used by daily cron to flip isAvailable
   avatar          String?  // Avatar URL
   
   createdAt       DateTime @default(now())
@@ -169,15 +170,18 @@ model ClassMaterial {
 }
 
 model Enrollment {
-  id          String    @id @default(uuid()) @db.Uuid
-  studentId   String    @db.Uuid
-  classId     String    @db.Uuid
-  status      String    @default("ACTIVE")   // ACTIVE | CANCELLED
-  enrolledAt  DateTime  @default(now())
-  student     Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  class       Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
-  payment     Payment?
-  review      Review?
+  id            String    @id @default(uuid()) @db.Uuid
+  studentId     String    @db.Uuid
+  classId       String    @db.Uuid
+  status        String    @default("ACTIVE")   // ACTIVE | UNENROLLED | CANCELLED
+  enrolledAt    DateTime  @default(now())
+  unenrolledAt  DateTime?
+  accessUntil   DateTime? // Date access (materials, meeting link) expires after unenroll
+  lastPaymentDueNotifiedAt DateTime? // Last time we notified student about pending monthly payment
+  student       Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  class         Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  payment       Payment?
+  review        Review?
 
   @@unique([studentId, classId])
 }
