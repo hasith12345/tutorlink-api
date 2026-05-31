@@ -177,7 +177,7 @@ exports.confirmPayment = async (req, res) => {
         title: isRenewal ? "Payment Renewed" : "Enrollment Confirmed",
         message: isRenewal
           ? `Your monthly payment for ${cls.subject} has been renewed. Access restored.`
-          : `You have successfully enrolled in ${cls.subject}. Payment of Rs.${cls.fees.toLocaleString()} received.`,
+          : `You have successfully enrolled in ${cls.subject}. Your learning journey starts now!`,
       });
     } catch (e) {
       console.error('[PAYMENT] Student notification failed:', e.message)
