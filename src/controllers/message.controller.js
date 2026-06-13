@@ -104,11 +104,58 @@ async function getConversations(req, res) {
 }
 
 // POST /api/messages/conversations
-// Student creates or gets existing conversation with a tutor
+// Creates or gets an existing conversation. A student initiates with a tutor
+// (body: { tutorId }); a tutor initiates with an enrolled student (body: { studentId }).
 async function createOrGetConversation(req, res) {
   try {
     const userId = req.user.id;
-    const { tutorId } = req.body;
+    const { tutorId, studentId } = req.body;
+
+    // Tutor initiating a conversation with one of their enrolled students
+    if (studentId) {
+      const tutor = await prisma.tutor.findUnique({ where: { userId } });
+      if (!tutor) return res.status(403).json({ message: "Only tutors can message students" });
+
+      // Guard: the student must be actively enrolled in one of this tutor's classes
+      const enrollment = await prisma.enrollment.findFirst({
+        where: {
+          studentId,
+          class: { tutorId: tutor.id },
+          status: "ACTIVE",
+        },
+      });
+      if (!enrollment) {
+        return res.status(403).json({ message: "This student is not enrolled in your classes" });
+      }
+
+      const conversation = await prisma.conversation.upsert({
+        where: { studentId_tutorId: { studentId, tutorId: tutor.id } },
+        create: { studentId, tutorId: tutor.id },
+        update: {},
+        include: {
+          student: {
+            select: {
+              id: true,
+              avatar: true,
+              user: { select: { fullName: true } },
+            },
+          },
+        },
+      });
+
+      return res.json({
+        conversation: {
+          id: conversation.id,
+          otherParty: {
+            id: conversation.student.id,
+            name: conversation.student.user.fullName,
+            avatar: conversation.student.avatar,
+            role: "student",
+          },
+          updatedAt: conversation.updatedAt,
+        },
+      });
+    }
 
     if (!tutorId) return res.status(400).json({ message: "tutorId is required" });
 
