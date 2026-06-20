@@ -10,6 +10,7 @@ const classFolderRoutes = require("./routes/classFolder.routes");
 const reviewRoutes = require("./routes/review.routes");
 const notificationRoutes = require("./routes/notification.routes");
 const messageRoutes = require("./routes/message.routes");
+const contactRoutes = require("./routes/contact.routes");
 const errorMiddleware = require("./middleware/error.middleware.js");
 
 const app = express();
@@ -50,6 +51,9 @@ app.use("/api/notifications", notificationRoutes);
 
 // ✅ MESSAGE ROUTES
 app.use("/api/messages", messageRoutes);
+
+// ✅ CONTACT ROUTES
+app.use("/api/contact", contactRoutes);
 
 // ✅ ERROR HANDLER (LAST)
 app.use(errorMiddleware);
