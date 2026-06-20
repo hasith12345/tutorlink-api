@@ -36,4 +36,57 @@ async function createNotification({ userId, type, title, message }) {
   }
 }
 
-module.exports = { createNotification, ADMIN_ROOM }
+async function getUserNotifications(userId) {
+  return prisma.notification.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } })
+}
+
+async function getUserUnreadCount(userId) {
+  return prisma.notification.count({ where: { userId, read: false } })
+}
+
+async function markAsRead(userId, id) {
+  return prisma.notification.updateMany({ where: { id, userId }, data: { read: true } })
+}
+
+async function markAllAsRead(userId) {
+  return prisma.notification.updateMany({ where: { userId, read: false }, data: { read: true } })
+}
+
+async function deleteNotification(userId, id) {
+  return prisma.notification.deleteMany({ where: { id, userId } })
+}
+
+async function getAdminNotifications() {
+  return prisma.notification.findMany({ where: { userId: null }, orderBy: { createdAt: 'desc' } })
+}
+
+async function getAdminUnreadCount() {
+  return prisma.notification.count({ where: { userId: null, read: false } })
+}
+
+async function markAdminAsRead(id) {
+  return prisma.notification.updateMany({ where: { id, userId: null }, data: { read: true } })
+}
+
+async function markAllAdminAsRead() {
+  return prisma.notification.updateMany({ where: { userId: null, read: false }, data: { read: true } })
+}
+
+async function deleteAdminNotification(id) {
+  return prisma.notification.deleteMany({ where: { id, userId: null } })
+}
+
+module.exports = {
+  createNotification,
+  ADMIN_ROOM,
+  getUserNotifications,
+  getUserUnreadCount,
+  markAsRead,
+  markAllAsRead,
+  deleteNotification,
+  getAdminNotifications,
+  getAdminUnreadCount,
+  markAdminAsRead,
+  markAllAdminAsRead,
+  deleteAdminNotification,
+}

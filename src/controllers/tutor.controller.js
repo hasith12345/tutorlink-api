@@ -1,278 +1,32 @@
-const { prisma } = require("../models");
+const tutorService = require('../services/tutor.service');
 
-/**
- * Search tutors by subject, location, and learning mode
- */
 exports.searchTutors = async (req, res) => {
   try {
-    const { subject, location, learningMode, limit = 50 } = req.query;
-
-    // Build search filters — only show APPROVED tutors who have at least one active class
-    // Combine status + mode into one classes.some filter so they stack correctly
-    const classFilter = { status: "ACTIVE" };
-    if (learningMode && ["online", "physical", "hybrid"].includes(learningMode)) {
-      classFilter.mode = learningMode;
-    }
-
-    const filters = {
-      isAvailable: true,
-      applicationStatus: "APPROVED",
-      classes: { some: classFilter },
-    };
-
-    // Search across tutor name, subject field, subjects[] array, and class subjects
-    if (subject && subject.trim()) {
-      const q = subject.trim();
-      filters.OR = [
-        { subject: { contains: q, mode: "insensitive" } },
-        { subjects: { has: q } },
-        { user: { fullName: { contains: q, mode: "insensitive" } } },
-        { classes: { some: { ...classFilter, subject: { contains: q, mode: "insensitive" } } } },
-      ];
-    }
-
-    // Filter by location
-    if (location && location.trim()) {
-      filters.location = {
-        contains: location,
-        mode: "insensitive",
-      };
-    }
-
-    // Fetch tutors with user data
-    const tutors = await prisma.tutor.findMany({
-      where: filters,
-      include: {
-        user: {
-          select: {
-            id: true, fullName: true, email: true,
-            student: { select: { avatar: true } },
-          },
-        },
-        classes: {
-          where: { status: "ACTIVE" },
-          orderBy: { fees: "asc" },
-        },
-      },
-      take: parseInt(limit),
-      orderBy: [
-        { rating: "desc" },
-        { totalStudents: "desc" },
-      ],
-    });
-
-    // Format response
-    const formattedTutors = tutors.map((tutor) => ({
-      id: tutor.id,
-      userId: tutor.userId,
-      name: tutor.user.fullName,
-      email: tutor.user.email,
-      subject: tutor.subject,
-      subjects: tutor.subjects,
-      location: tutor.location,
-      bio: tutor.bio,
-      experience: tutor.experience,
-      education: tutor.education,
-      hourlyRate: tutor.hourlyRate,
-      learningMode: tutor.learningMode,
-      rating: tutor.rating,
-      totalReviews: tutor.totalReviews,
-      totalStudents: tutor.totalStudents,
-      isVerified: tutor.isVerified,
-      avatar: tutor.avatar || tutor.user.student?.avatar || null,
-      classes: tutor.classes,
-      lowestFee: tutor.classes.length > 0 ? Math.min(...tutor.classes.map(c => c.fees)) : null,
-    }));
-
-    res.status(200).json({
-      success: true,
-      count: formattedTutors.length,
-      tutors: formattedTutors,
-    });
+    const tutors = await tutorService.searchTutors(req.query);
+    res.status(200).json({ success: true, count: tutors.length, tutors });
   } catch (error) {
-    console.error("Search tutors error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to search tutors",
-      error: error.message,
-    });
+    console.error('Search tutors error:', error);
+    res.status(500).json({ success: false, message: 'Failed to search tutors', error: error.message });
   }
 };
 
-/**
- * Get tutor suggestions for autocomplete
- */
 exports.getTutorSuggestions = async (req, res) => {
   try {
-    const { query, limit = 10 } = req.query;
-    const q = (query || "").trim();
-    const take = parseInt(limit);
-
-    // Only suggest from APPROVED + active tutors (matches search behavior)
-    const baseFilter = {
-      isAvailable: true,
-      applicationStatus: "APPROVED",
-      classes: { some: { status: "ACTIVE" } },
-    };
-
-    // 1. SUBJECT suggestions — distinct list from tutor.subject, tutor.subjects[], class.subject
-    //    Aggregate from the DB then dedupe/filter client-side by case-insensitive match
-    const [tutorRows, classRows] = await Promise.all([
-      prisma.tutor.findMany({
-        where: baseFilter,
-        select: { subject: true, subjects: true },
-      }),
-      prisma.class.findMany({
-        where: { status: "ACTIVE", tutor: baseFilter },
-        select: { subject: true },
-      }),
-    ]);
-
-    const subjectCounts = new Map(); // key = lowercase, val = { canonical, count }
-    const bumpSubject = (s) => {
-      if (!s || !s.trim()) return;
-      const key = s.trim().toLowerCase();
-      if (!subjectCounts.has(key)) subjectCounts.set(key, { canonical: s.trim(), count: 0 });
-      subjectCounts.get(key).count++;
-    };
-    tutorRows.forEach((t) => {
-      bumpSubject(t.subject);
-      (t.subjects || []).forEach(bumpSubject);
-    });
-    classRows.forEach((c) => bumpSubject(c.subject));
-
-    let subjectList = Array.from(subjectCounts.values());
-    if (q) {
-      const ql = q.toLowerCase();
-      subjectList = subjectList.filter((s) => s.canonical.toLowerCase().includes(ql));
-    }
-    subjectList.sort((a, b) => b.count - a.count || a.canonical.localeCompare(b.canonical));
-    const subjectSuggestions = subjectList.slice(0, take).map((s) => ({
-      type: "subject",
-      value: s.canonical,
-      displayText: s.canonical,
-      count: s.count,
-    }));
-
-    // 2. TUTOR suggestions — only when there's a query (avoid dumping every tutor)
-    let tutorSuggestions = [];
-    if (q) {
-      const tutors = await prisma.tutor.findMany({
-        where: {
-          ...baseFilter,
-          OR: [
-            { user: { fullName: { contains: q, mode: "insensitive" } } },
-            { subject: { contains: q, mode: "insensitive" } },
-            { subjects: { has: q } },
-          ],
-        },
-        include: {
-          user: {
-            select: {
-              fullName: true,
-              student: { select: { avatar: true } },
-            },
-          },
-        },
-        take,
-        orderBy: { rating: "desc" },
-      });
-      tutorSuggestions = tutors.map((tutor) => ({
-        type: "tutor",
-        id: tutor.id,
-        name: tutor.user.fullName,
-        subject: tutor.subject,
-        displayText: tutor.subject ? `${tutor.user.fullName} — ${tutor.subject}` : tutor.user.fullName,
-        avatar: tutor.avatar || tutor.user.student?.avatar || null,
-      }));
-    }
-
-    res.status(200).json({
-      success: true,
-      subjects: subjectSuggestions,
-      tutors: tutorSuggestions,
-      // Backward-compatible flat list (existing frontend reads this)
-      suggestions: [...subjectSuggestions, ...tutorSuggestions],
-    });
+    const result = await tutorService.getTutorSuggestions(req.query);
+    res.status(200).json({ success: true, ...result });
   } catch (error) {
-    console.error("Get suggestions error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to get suggestions",
-      error: error.message,
-    });
+    console.error('Get suggestions error:', error);
+    res.status(500).json({ success: false, message: 'Failed to get suggestions', error: error.message });
   }
 };
 
-/**
- * Get tutor by ID
- */
 exports.getTutorById = async (req, res) => {
   try {
-    const { id } = req.params;
-
-    const tutor = await prisma.tutor.findUnique({
-      where: { id },
-      include: {
-        user: {
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-            student: { select: { avatar: true } },
-          },
-        },
-        classes: {
-          where: { status: "ACTIVE" },
-          orderBy: { fees: "asc" },
-        },
-      },
-    });
-
-    // Hide tutors that are inactive (haven't visited dashboard in 30+ days) — treat as not found
-    if (tutor && tutor.isAvailable === false) {
-      return res.status(404).json({ success: false, message: "Tutor not found" });
-    }
-
-    if (!tutor) {
-      return res.status(404).json({
-        success: false,
-        message: "Tutor not found",
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      tutor: {
-        id: tutor.id,
-        userId: tutor.userId,
-        name: tutor.user.fullName,
-        email: tutor.user.email,
-        subject: tutor.subject,
-        subjects: tutor.subjects,
-        location: tutor.location,
-        bio: tutor.bio,
-        experience: tutor.experience,
-        education: tutor.education,
-        hourlyRate: tutor.hourlyRate,
-        learningMode: tutor.learningMode,
-        rating: tutor.rating,
-        totalReviews: tutor.totalReviews,
-        totalStudents: tutor.totalStudents,
-        isVerified: tutor.isVerified,
-        avatar: tutor.avatar || tutor.user.student?.avatar || null,
-        phone: tutor.phone,
-        address: tutor.address,
-        qualifications: tutor.qualifications,
-        classes: tutor.classes,
-      },
-    });
+    const tutor = await tutorService.getTutorById(req.params.id);
+    res.status(200).json({ success: true, tutor });
   } catch (error) {
-    console.error("Get tutor error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to get tutor",
-      error: error.message,
-    });
+    console.error('Get tutor error:', error);
+    if (error.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Failed to get tutor', error: error.message });
   }
 };
