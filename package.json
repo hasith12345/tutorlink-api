@@ -1,7 +1,7 @@
 {
   "name": "tutorlink---backend",
   "version": "1.0.0",
-  "description": "",
+  "description": "Students and Tutors connect platform for online and in-person learning. Built with Node.js, Express, Prisma, PostgreSQL, and Socket.io.",
   "main": "server.js",
   "scripts": {
     "dev": "nodemon server.js",
